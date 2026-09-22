@@ -1,235 +1,233 @@
-# 11 — CRM process design (startup)
+# 11 — CRM process design (pre-launch)
 
-**Who:** you · **Time:** 45 min · **Cost:** £0 · **Needs:** guide 10
+**Who:** you · **Time:** 20 min · **Cost:** £0 · **Needs:** guide 10
 
-Read this **before** configuring Odoo. It defines what the CRM is actually for, so the
-configuration follows a decision rather than a default.
+Read this **before** configuring Odoo.
 
----
-
-## The governing principle
-
-You are a startup with no SDR team. Most CRM advice assumes a sales org that doesn't
-exist yet, and copying it produces an elaborate pipeline nobody maintains — which is
-worse than a simple one that gets used.
-
-**Set up the smallest thing that answers three questions:**
-
-1. Who do I need to contact today?
-2. What happened last time I contacted them?
-3. Which deals might actually close?
-
-Everything else is premature. Odoo makes stages, teams and automation easy to add
-later — but a stage nobody updates is worse than no stage, because it makes the
-pipeline lie.
+> **Note:** an earlier version of this guide specified six pipeline stages and seven
+> lost reasons. That was over-built for a site with no traffic. This version is
+> deliberately smaller.
 
 ---
 
-## Decisions taken
+## Where you actually are
 
-| Decision | Choice | Why |
+- Website launching, not launched
+- No paid traffic
+- New domain, so effectively no organic authority — ranking takes months
+- Zero customers
+
+**Realistic first-quarter volume: 0–5 form submissions a month**, most of them
+curiosity or spam.
+
+That number should drive everything below. A pipeline built for 200 leads a month,
+run at 3 leads a month, becomes an abandoned chore within weeks — and an abandoned
+pipeline is worse than none, because it makes your data lie.
+
+---
+
+## The test
+
+**Before adding any stage, field or automation: will it change a decision someone
+makes in the next 30 days?**
+
+If not, don't build it. Odoo makes everything below easy to add later; none of it is
+easier to add now.
+
+Applying that test honestly:
+
+| Thing | Changes a decision? | Verdict |
 |---|---|---|
-| SDR / AE split | **None — one queue** | You don't have two roles. A fake split creates leads nobody owns |
-| Non-sales inquiries | **Not in the pipeline** | Support, partnership and media aren't deals. Slack + database is enough |
-| Repeat submitters | **Update the existing record** | One person, one record. Score rises, note logged |
-| Leads vs Opportunities | **Both, split by tier** | Keeps the pipeline meaningful |
+| Knowing a lead arrived | Yes — you call them | ✅ Already done via Slack + email |
+| **Which page brought them** | **Yes — tells you what to write next** | ✅ **The main event** |
+| What you said last time | Yes, on the second call | ✅ Notes |
+| 6 pipeline stages | No — you'll have 3 leads and remember all of them | ❌ Cut to 4 |
+| 7 lost reasons | No — you'll lose maybe 2 deals | ❌ Cut to 4 |
+| Assignment rules | No — there's one of you | ❌ Skip |
+| Email templates in Odoo | No | ❌ Skip |
+| Sales targets, forecasting | No — nothing to forecast | ❌ Skip |
 
 ---
 
-## What reaches Odoo, and how
+## What the CRM is for right now
 
-The backend scores and routes before anything is pushed. Odoo doesn't re-qualify.
+**Not pipeline management. Attribution.**
 
-| Tier | Score | Odoo | Why |
-|---|---|---|---|
-| `enterprise_ae` | 80–100 | **Opportunity** — pipeline, New stage | Real deal, work it today |
-| `sdr` | 50–79 | **Opportunity** — pipeline, New stage | Real deal, work it this week |
-| `nurture` | 30–49 | **Lead** — not in pipeline | Might become real. Don't forecast it |
-| `marketing_drip` | 0–29 | **Lead** — not in pipeline | Newsletter subscriber |
-| `bypass_*` | — | **Not pushed** | Not sales |
+With no PPC, every lead comes from something you wrote or somewhere you appeared. The
+question worth answering is *which*.
 
-**This split is the single most important part of the setup.**
+Your backend already captures this on every submission:
 
-If everything lands in the pipeline, the pipeline fills with newsletter subscribers,
-your forecast becomes fiction, and within a month you stop opening it. Leads sit in a
-separate list you review weekly. Opportunities are things you're actually working.
+| Field | Answers |
+|---|---|
+| `landing_page` | Which page or blog post they arrived on |
+| `referrer_url` | Which site sent them |
+| `utm_*` | Which campaign, once you run any |
+| `framework_interest` | Which compliance framework they care about |
 
-> Odoo hides the Leads stage by default. Turn it on:
-> **CRM → Configuration → Settings → Leads** ✅
+**That is your content strategy, derived from real behaviour rather than guesswork.**
+Three leads from one SOC 2 article tells you more than any keyword tool.
 
----
-
-## Pipeline stages
-
-Six stages. Each represents **a thing that happened**, not a feeling about the deal.
-
-| # | Stage | Enter when | Exit when |
-|---|---|---|---|
-| 1 | **New** | Integration created it | You've attempted contact |
-| 2 | **Contacted** | You emailed or called | They replied |
-| 3 | **Qualified** | They replied and have a real need | A demo is booked |
-| 4 | **Demo Booked** | Meeting in the calendar | Demo happened |
-| 5 | **Proposal** | Pricing sent | They decide |
-| 6 | **Won** / **Lost** | Signed / dead | — |
-
-**Why not fewer:** with three stages you can't tell "emailed, no reply" from "had a
-great call". Those need completely different follow-up.
-
-**Why not more:** every stage is manual upkeep. Six is what one person maintains
-honestly.
-
-**The rule that keeps it useful:** a stage advances only on **their** action, never
-your optimism. "I sent a really good email" is still Contacted.
+Lead source is also the field most commonly neglected early and the most expensive to
+retrofit. Capturing it consistently from day one means that by the time you're making
+real budget decisions, you have a year of clean history.
 
 ---
 
-## Priority stars
+## Minimal Odoo configuration
 
-The integration sets Odoo's priority from the score:
+### 1. Enable Leads ⚠️
 
-| Score | Odoo | Meaning |
+**Settings → CRM → Leads** ✅ (off by default)
+
+This is what keeps newsletter subscribers out of your pipeline.
+
+| Tier | Odoo | Why |
 |---|---|---|
-| 80–100 | ⭐⭐⭐ | Contact today |
-| 50–79 | ⭐⭐ | Contact this week |
-| 30–49 | ⭐ | Nurture |
-| 0–29 | — | Newsletter |
+| 80–100, 50–79 | **Opportunity** — pipeline | Someone will contact them |
+| 30–49, 0–29 | **Lead** — outside pipeline | A list, not a deal |
+| support / partnership / media | **Not pushed** | Not deals |
 
-Solo, this replaces routing entirely. You don't need assignment rules when there's one
-person — you need to know **what to open first**. Sort the pipeline by priority and
-work top-down.
+Keep this even at low volume. It's not about absolute numbers but ratio — a blog post
+that brings 200 visitors might produce 10 newsletter signups and 1 demo request. If
+all 11 land in the pipeline, the one that matters is buried.
 
----
+Costs you nothing: the backend decides it automatically.
 
-## SLA as an activity
+### 2. Four stages
 
-The backend computes `sla_due_at` — 1 hour for 80+, 4 hours for 50–79. The integration
-creates a scheduled **Activity** in Odoo with that deadline.
+```
+New → Contacted → Meeting → Proposal → Won / Lost
+```
 
-This matters because Odoo shows overdue activities in **red** on the dashboard. An SLA
-that lives only in a database column is a number nobody sees; an overdue activity is
-visible every time you open the CRM.
+| Stage | Enter when |
+|---|---|
+| **New** | Integration created it |
+| **Contacted** | You've emailed or called |
+| **Meeting** | A call is booked |
+| **Proposal** | Pricing sent |
 
-| Score | Activity | Deadline |
-|---|---|---|
-| 80–100 | Call | 1 hour |
-| 50–79 | Email | 4 hours |
-| Below | None | — |
+Four working stages is the low end of the usual 3–5 recommendation, which is right for
+pre-revenue. Add stages when you hit something you genuinely can't track — a security
+review, a legal redline — not in advance.
 
-Solo you will miss some. That's fine — the point is knowing you missed it.
+**The rule:** a stage advances on **their** action, not your optimism. "I sent a good
+email" is still Contacted.
 
----
-
-## Lost reasons
-
-Configure these before launch. Without them everything gets marked "Not interested" and
-you learn nothing about why you're losing.
+### 3. Four lost reasons
 
 **CRM → Configuration → Lost Reasons**
 
-| Reason | Tells you |
+| Reason | What it tells you |
 |---|---|
-| No budget | Pricing or targeting problem |
-| Bad timing — no audit due | Follow-up in 6 months, not dead |
-| Chose a competitor | **Ask which one.** The most valuable data you will collect** |
-| No response | Your outreach, not their interest |
-| Not a fit — too small | Refine targeting |
-| Already has a GRC tool | Displacement sale, different motion |
-| Duplicate | Data hygiene |
+| **No response** | Your outreach, not their interest |
+| **Bad timing — no audit due** | Future pipeline. Set a reminder, don't delete |
+| **Not a fit** | Targeting problem |
+| **Chose a competitor** | **Ask which.** The most valuable thing you'll learn early |
 
-"Bad timing" and "Chose a competitor" are the two worth tracking obsessively. The first
-is a future pipeline you can schedule. The second tells you what you're actually
-competing against.
+Four, not seven. You can add "No budget" and "Already has a tool" when you've actually
+lost deals for those reasons and can tell them apart.
 
----
+### 4. One sales team
 
-## Tags
+`Inbound`. You are the only member. Skip assignment rules entirely.
 
-Created automatically by the integration:
+### 5. Skip everything else
 
-- **Framework** — `soc2`, `iso27001`, `hipaa`, `gdpr`, … from the form or parsed from
-  their message
-- **Tier** — `enterprise_ae`, `sdr`, `nurture`
-- **Source** — which form they used
+Not now: email templates, automated actions, scoring rules, multiple teams, sales
+targets, custom fields, recurring revenue tracking.
 
-Framework tags are the useful ones. "Show me everyone who mentioned SOC 2" is how you
-decide what content to write next.
+Odoo supports all of it. None of it changes a decision in your next 30 days.
 
 ---
 
-## Your weekly routine
+## Your actual routine
 
-The process only works if it's small enough to actually do.
+**When a lead arrives** — you already get a Slack alert and the confirmation email is
+sent automatically. Open Odoo, read the score breakdown in the description, call or
+email them. Log what happened as a note.
 
-**Daily (10 min)** — open the pipeline sorted by priority. Work every ⭐⭐⭐. Clear
-overdue activities.
+**Weekly, 10 minutes** — look at the Leads list. Anyone re-engaged? Move dead
+opportunities to Lost with a reason.
 
-**Weekly (30 min)** — review the Leads list (nurture tier) for anyone who re-engaged.
-Move stale opportunities to Lost with a reason. Check the CRM count matches the
-database.
+**Monthly, 20 minutes — the one that matters:**
 
-**Monthly (1 hr)** — review lost reasons for patterns. Check whether scoring matches
-reality: are your ⭐⭐⭐ leads actually the ones converting? If not, tell me and I'll
-adjust the weights.
+```
+CRM → Reporting → group by Source / Campaign
+```
 
-That last one is the feedback loop that makes scoring worth having. The model is a
-guess until real outcomes correct it.
+Which pages produced leads? That tells you what to write next month. At this stage
+that single report is worth more than the entire pipeline.
+
+---
+
+## When to add more
+
+Add complexity when you hit the trigger, not before:
+
+| Trigger | Add |
+|---|---|
+| Over 20 leads/month | More stages, if you're genuinely losing track |
+| Second person selling | Assignment rules, team split — the backend already computes the tier |
+| Running PPC | Campaign-level reporting, cost-per-lead |
+| Over 10 deals lost | More granular lost reasons |
+| Repeating the same email | Templates |
+| Missing follow-ups | Automated activity reminders |
+
+Every one of these is a config change. The backend data model already supports all of
+it — the tier, score and full attribution are stored regardless of whether Odoo acts
+on them today.
 
 ---
 
 ## Odoo configuration checklist
 
-In order:
+- [ ] **Settings → CRM → enable Leads**
+- [ ] **Configuration → Sales Teams** — one team, `Inbound`
+- [ ] **Configuration → Stages** — New, Contacted, Meeting, Proposal, Won, Lost
+- [ ] **Configuration → Lost Reasons** — the four above
+- [ ] **Settings → Users** — create `Backend Integration` (guide 10)
+- [ ] Confirm you're the default salesperson on `Inbound`
 
-- [ ] **Settings → CRM → enable Leads** ⚠️ off by default; the whole split depends on it
-- [ ] **Configuration → Sales Teams** — create one, `Inbound`. Just one
-- [ ] **Configuration → Stages** — set the six above, in order
-- [ ] Assign all stages to the `Inbound` team
-- [ ] **Configuration → Lost Reasons** — add the seven above
-- [ ] **Settings → Users** — create the `Backend Integration` user (guide 10)
-- [ ] Confirm you are the default salesperson for the Inbound team
-
-**Don't set up yet:** email templates, automated actions, scoring rules, multiple
-teams, or sales targets. Odoo has all of it and none of it earns its keep at zero
-customers.
+**20 minutes.** If it takes longer, something is being over-configured.
 
 ---
 
-## What I build once this is configured
+## Is Odoo even worth it yet?
 
-- Create Opportunity for `enterprise_ae` / `sdr`, Lead for `nurture` /
-  `marketing_drip`
-- Skip `bypass_*` entirely
-- Search by email first — update rather than duplicate
+Reasonable question. Common advice is that a spreadsheet is enough for your first ~20
+deals, because it forces you to understand the motion before automating it.
+
+That advice assumes manual data entry. Yours is automatic — the backend pushes leads
+with full attribution, scoring and history whether or not you look at them. The
+marginal cost is near zero, and you avoid migrating a year of records later.
+
+**So: set it up, minimally, and mostly ignore it until leads start arriving.** The
+attribution report is the part to actually open.
+
+---
+
+## What I build once configured
+
+- Opportunity for the two sales tiers, Lead for the rest, nothing for non-sales
+- Dedupe by email — update, never duplicate
 - Priority stars from score
-- Scheduled activity from `sla_due_at`
 - Framework, tier and source tags
-- Native UTM mapping (`source_id`, `medium_id`, `campaign_id`)
-- Score breakdown in the description, so you see **why** it scored what it did
-- Odoo record id stored on our side, so a retry can never create a second copy
+- Native UTM mapping (`source_id`, `medium_id`, `campaign_id`) so attribution reporting
+  works out of the box
+- Score breakdown in the description, so you see *why* it scored what it did
+- Odoo id stored on our side, so a retry can't create a second copy
+
+Deliberately **not** building yet: activity/SLA creation. With 3 leads a month you are
+not going to miss one. It's a few lines when volume justifies it.
 
 ---
 
 ## Done when
 
 - [ ] Leads enabled
-- [ ] One sales team
-- [ ] Six stages in order
-- [ ] Seven lost reasons
+- [ ] Four stages, four lost reasons, one team
 - [ ] Integration user created
-- [ ] You know your daily routine
+- [ ] You know the monthly attribution report is the thing to open
 
-**Then:** hand me the credentials from guide 10 and I'll build the integration.
-
----
-
-## What changes when you hire
-
-Nothing structural. When a second person joins:
-
-- Add them as an Odoo user
-- Either split the team, or keep one team and assign by priority
-- Tell me, and I'll turn assignment rules back on — the backend already computes
-  `enterprise_ae` vs `sdr`, it's just collapsed to one queue for now
-
-The tier distinction is preserved in the data throughout. You are not losing it, only
-not acting on it yet.
+**Then:** send me the credentials from guide 10.

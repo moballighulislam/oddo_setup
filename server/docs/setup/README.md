@@ -22,9 +22,9 @@ hand back.
 | 08 | [Slack & calendar](./08-slack-and-calendar.md) | You | 15 min | £0 |
 | 09 | [Go-live checklist](./09-go-live-checklist.md) | Both | 1 hr | — |
 | 10 | [Odoo CRM](./10-odoo-crm.md) | You | 45 min | £0 |
-| 11 | [CRM process design](./11-crm-process.md) | You | 45 min | £0 |
+| 11 | [CRM process design](./11-crm-process.md) | You | 20 min | £0 |
 
-**Total: roughly 5.5 hours of your time, £0–25/month.**
+**Total: roughly 5 hours of your time, £0–25/month.**
 
 Guides 10 and 11 can be done any time — the CRM is independent of launch. **Read 11
 before configuring Odoo in 10**: it decides what the pipeline is for, and the
