@@ -1,0 +1,1154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GRC SaaS — Automation architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#fafaf9;--surface:#fff;--surface-dim:#f3f3f1;--surface-dark:#1a1a19;
+  --ink:#1a1a19;--ink-2:#6b6b68;--ink-3:#a3a39f;--ink-inv:#fafaf9;
+  --line:#e5e5e2;--line-strong:#d0d0cc;
+  --pop:#3d5afe;--pop-dim:#eceffe;
+  --sans:'DM Sans',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',monospace;
+  --r:6px;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1060px;margin:0 auto;padding:0 20px}
+
+/* ---- SITE HEADER ---- */
+.site-header{padding:44px 0 20px}
+.site-header .wrap{max-width:1060px;margin:0 auto;padding:0 20px}
+.site-header h1{font-size:clamp(26px,4vw,36px);font-weight:700;letter-spacing:-.02em;line-height:1.1;margin-bottom:8px}
+.site-header h1 span{color:var(--ink-3);font-weight:400}
+.site-header p{font-size:14px;color:var(--ink-2);max-width:560px;line-height:1.6}
+
+/* ---- TAB BAR ---- */
+.maintabs{position:sticky;top:0;background:var(--bg);z-index:20;border-bottom:1px solid var(--line);margin-bottom:40px}
+.maintabs-inner{max-width:1060px;margin:0 auto;padding:0 20px;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none}
+.maintabs-inner::-webkit-scrollbar{display:none}
+.maintab{display:flex;align-items:center;gap:7px;padding:12px 14px;border-radius:6px 6px 0 0;background:none;border:none;cursor:pointer;font-family:var(--sans);font-size:13px;font-weight:500;color:var(--ink-3);white-space:nowrap;flex-shrink:0;border-bottom:2px solid transparent;transition:all .15s}
+.maintab:hover{color:var(--ink-2);background:var(--surface-dim)}
+.maintab.on{color:var(--ink);border-bottom-color:var(--ink)}
+.maintab .mt-num{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.maintab.on .mt-num{color:var(--pop)}
+
+/* ---- TAB PANELS ---- */
+.tabpanel{display:none}
+.tabpanel.on{display:block}
+.tab-intro{margin-bottom:32px}
+.tab-intro .section-label{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-3);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px}
+.tab-intro h2{font-size:22px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px}
+.tab-intro p{font-size:14px;color:var(--ink-2);max-width:640px;line-height:1.6}
+.meta-row{display:flex;gap:24px;margin-top:16px;flex-wrap:wrap}
+.meta-row span{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.meta-row span strong{color:var(--ink);font-weight:500}
+
+.section-label{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-3);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px}
+
+/* ---- EXPANDABLE LIST (forms AND automation items share this) ---- */
+.form-list{display:flex;flex-direction:column;gap:1px;background:var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:24px}
+.form-item{background:var(--surface);cursor:pointer;transition:background .15s}
+.form-item:hover{background:var(--surface-dim)}
+.form-item.open{background:var(--surface)}
+.form-head{display:flex;align-items:center;padding:16px 24px;gap:16px}
+.form-num{font-family:var(--mono);font-size:32px;font-weight:500;color:var(--line-strong);min-width:48px;line-height:1}
+.form-item.open .form-num{color:var(--pop)}
+.form-info{flex:1;min-width:0}
+.form-info h3{font-size:16px;font-weight:700;line-height:1.3}
+.form-info p{font-size:13px;color:var(--ink-2);margin-top:2px}
+.form-placement{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.form-placement span{font-family:var(--mono);font-size:11px;color:var(--ink-3);background:var(--surface-dim);padding:2px 8px;border-radius:3px}
+.form-fields-count{font-family:var(--mono);font-size:13px;color:var(--ink-2);white-space:nowrap;text-align:right}
+.form-toggle{width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--ink-3);transition:transform .2s;flex-shrink:0}
+.form-item.open .form-toggle{transform:rotate(180deg)}
+.form-body{display:none;border-top:1px solid var(--line)}
+.form-item.open .form-body{display:block}
+.fields-wrap{display:grid;grid-template-columns:1fr 1fr;min-height:0}
+@media(max-width:700px){.fields-wrap{grid-template-columns:1fr}}
+.visible-fields,.hidden-fields{padding:20px 24px}
+.hidden-fields{background:var(--surface-dim)}
+.fields-title{font-family:var(--mono);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1.2px;color:var(--ink-3);margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.fields-title::after{content:'';flex:1;height:1px;background:var(--line)}
+.f-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:6px 0;font-size:13px}
+.f-row+.f-row{border-top:1px solid var(--line)}
+.hidden-fields .f-row+.f-row{border-top-color:rgba(0,0,0,.06)}
+.f-name{font-weight:500}
+.f-type{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.f-badge{font-family:var(--mono);font-size:10px;font-weight:500;padding:2px 6px;border-radius:3px}
+.f-badge.req{background:var(--ink);color:var(--ink-inv)}
+.f-badge.opt{background:var(--surface-dim);color:var(--ink-3)}
+.f-sample{font-family:var(--mono);font-size:11px;color:var(--ink-3);text-align:right}
+.h-cat{font-family:var(--mono);font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:1px;color:var(--ink-3);padding:12px 0 4px;grid-column:1/-1}
+.h-cat:first-child{padding-top:0}
+.hidden-fields .f-row{grid-template-columns:1fr auto}
+.form-note{padding:12px 24px;font-size:12px;color:var(--ink-2);background:var(--pop-dim);line-height:1.6}
+
+/* ---- PIPELINE TRACK (tab 0 only) ---- */
+.pipeline-track{display:flex;gap:0;position:relative;margin-bottom:24px}
+.pipeline-track::before{content:'';position:absolute;top:50%;left:32px;right:32px;height:2px;background:var(--line);z-index:0}
+.pipe-step{flex:1;text-align:center;position:relative;z-index:1;cursor:pointer}
+.pipe-dot{width:40px;height:40px;border-radius:50%;background:var(--surface);border:2px solid var(--line);margin:0 auto 8px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:500;color:var(--ink-3);transition:all .2s}
+.pipe-step:hover .pipe-dot{border-color:var(--ink-3)}
+.pipe-step.on .pipe-dot{background:var(--ink);border-color:var(--ink);color:var(--ink-inv)}
+.pipe-name{font-size:12px;font-weight:500;color:var(--ink-2);line-height:1.3}
+.pipe-sub{font-size:11px;color:var(--ink-3);margin-top:2px}
+@media(max-width:600px){.pipe-name{font-size:10px}.pipe-sub{display:none}.pipe-dot{width:32px;height:32px;font-size:11px}}
+
+.stage-panel{display:none;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:16px}
+.stage-panel.on{display:block}
+.stage-head{padding:24px 28px 0}
+.stage-head h2{font-size:20px;font-weight:700;letter-spacing:-.01em}
+.stage-head p{font-size:13px;color:var(--ink-2);margin-top:4px;line-height:1.6;max-width:640px}
+.stage-body{padding:20px 28px 28px}
+
+pre.code{background:var(--surface-dark);color:#d4d4d4;font-family:var(--mono);font-size:12px;padding:20px;border-radius:var(--r);overflow-x:auto;line-height:1.7;margin:16px 0}
+pre.code .cm{color:#6a9955}
+pre.code .kw{color:#c586c0}
+pre.code .fn{color:#dcdcaa}
+pre.code .str{color:#ce9178}
+pre.code .vr{color:#9cdcfe}
+
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--line);margin-bottom:20px}
+.tab{padding:10px 20px;font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink-3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;background:none;border-top:none;border-left:none;border-right:none}
+.tab:hover{color:var(--ink-2)}
+.tab.on{color:var(--ink);border-bottom-color:var(--ink)}
+.tab-panel{display:none}
+.tab-panel.on{display:block}
+
+.s-table{width:100%;border-collapse:collapse;font-size:13px}
+.s-table th{text-align:left;font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-3);text-transform:uppercase;letter-spacing:.5px;padding:8px 12px;border-bottom:2px solid var(--line)}
+.s-table td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.s-table td:first-child{font-weight:500;font-family:var(--mono);font-size:12px}
+.s-table .dtype{color:var(--ink-3);font-family:var(--mono);font-size:11px}
+.key-badge{font-family:var(--mono);font-size:9px;font-weight:500;padding:2px 5px;border-radius:3px;display:inline-block}
+.key-pk{background:var(--ink);color:var(--ink-inv)}
+.key-fk{background:var(--pop-dim);color:var(--pop)}
+.key-idx{background:var(--surface-dim);color:var(--ink-3)}
+
+.score-group{margin-bottom:20px}
+.score-label{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--ink-3);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px}
+.score-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;font-size:13px;border-bottom:1px dashed var(--line)}
+.score-row:last-child{border:none}
+.score-pts{font-family:var(--mono);font-size:12px;font-weight:500;min-width:40px;text-align:right}
+.score-pts.hi{color:#16a34a}
+.score-pts.md{color:#ca8a04}
+.score-pts.lo{color:var(--ink-3)}
+.score-bar{height:4px;border-radius:2px;background:var(--line);margin-left:12px;width:60px;flex-shrink:0}
+.score-bar span{display:block;height:100%;border-radius:2px;background:var(--ink)}
+.score-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+@media(max-width:700px){.score-cols{grid-template-columns:1fr}}
+
+.route-tier{display:grid;grid-template-columns:80px 1fr;gap:0;border-bottom:1px solid var(--line);padding:16px 0}
+.route-tier:last-child{border:none}
+.route-range{font-family:var(--mono);font-size:20px;font-weight:700;line-height:1}
+.route-range small{display:block;font-size:11px;font-weight:400;color:var(--ink-3);margin-top:2px}
+.route-detail h4{font-size:14px;font-weight:700;margin-bottom:4px}
+.route-detail p{font-size:13px;color:var(--ink-2);line-height:1.5}
+.route-specials{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px;padding-top:20px;border-top:1px solid var(--line)}
+@media(max-width:700px){.route-specials{grid-template-columns:1fr}}
+.route-special{padding:16px;background:var(--surface-dim);border-radius:var(--r)}
+.route-special h4{font-family:var(--mono);font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.5px;color:var(--ink-3);margin-bottom:8px}
+.route-special p{font-size:13px;color:var(--ink-2);line-height:1.5}
+
+.note{font-size:12px;color:var(--ink-2);line-height:1.6;padding:12px 16px;background:var(--surface-dim);border-radius:var(--r);margin-top:16px}
+.note strong{color:var(--ink);font-weight:500}
+.tip{font-size:12px;color:var(--pop);line-height:1.6;padding:12px 16px;background:var(--pop-dim);border-radius:var(--r);margin-top:16px}
+
+.v-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+@media(max-width:700px){.v-grid{grid-template-columns:1fr}}
+.v-card{padding:16px;background:var(--surface-dim);border-radius:var(--r)}
+.v-card h4{font-size:13px;font-weight:700;margin-bottom:8px}
+.v-card ul{list-style:none;font-size:12px;color:var(--ink-2);line-height:2}
+.v-card ul li::before{content:'→ ';color:var(--ink-3)}
+
+/* ---- STAT STRIP (used on layer tabs) ---- */
+.stat-strip{display:flex;gap:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:28px}
+.stat-cell{flex:1;padding:14px 18px;border-right:1px solid var(--line)}
+.stat-cell:last-child{border-right:none}
+.stat-cell .num{font-family:var(--mono);font-size:20px;font-weight:500}
+.stat-cell .lbl{font-size:11px;color:var(--ink-2);margin-top:2px}
+@media(max-width:700px){.stat-strip{flex-wrap:wrap}.stat-cell{flex:1 1 50%;border-bottom:1px solid var(--line)}}
+
+footer{text-align:center;padding:32px 0;font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <h1>GRC SaaS — <span>automation architecture</span></h1>
+    <p>From the first form click through to long-term organic retention. Switch tabs to move through each layer of the system.</p>
+  </div>
+</header>
+
+<nav class="maintabs">
+  <div class="maintabs-inner">
+    <button class="maintab on" data-tab="tab-pipeline" onclick="switchMainTab(this)"><span class="mt-num">00</span> Form → CRM pipeline</button>
+    <button class="maintab" data-tab="tab-layer1" onclick="switchMainTab(this)"><span class="mt-num">01</span> Layer 1 — Instant capture</button>
+    <button class="maintab" data-tab="tab-layer2" onclick="switchMainTab(this)"><span class="mt-num">02</span> Layer 2 — CRM nurture branching</button>
+    <button class="maintab" data-tab="tab-layer3" onclick="switchMainTab(this)"><span class="mt-num">03</span> Layer 3 — Content &amp; organic reach</button>
+    <button class="maintab" data-tab="tab-layer4" onclick="switchMainTab(this)"><span class="mt-num">04</span> Layer 4 — Retention &amp; advocacy</button>
+    <button class="maintab" data-tab="tab-layer5" onclick="switchMainTab(this)"><span class="mt-num">05</span> Layer 5 — Email nurture</button>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<!-- ============================================================= -->
+<!-- TAB 00 — FORM TO CRM PIPELINE                                  -->
+<!-- ============================================================= -->
+<section class="tabpanel on" id="tab-pipeline">
+
+  <div class="tab-intro">
+    <div class="section-label">The base architecture</div>
+    <h2>Form → CRM pipeline</h2>
+    <p>Four reusable form templates across six-plus placements, feeding a five-stage pipeline from client-side capture to sales routing.</p>
+    <div class="meta-row">
+      <span><strong>4</strong> form templates</span>
+      <span><strong>6+</strong> placements</span>
+      <span><strong>~25</strong> hidden fields / submit</span>
+      <span><strong>5</strong> pipeline stages</span>
+    </div>
+  </div>
+
+  <div class="section-label">Form templates</div>
+  <div class="form-list">
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">01</div>
+        <div class="form-info">
+          <h3>Quick capture</h3>
+          <p>Grab interest fast. Qualify on the sales call, not the form.</p>
+          <div class="form-placement"><span>homepage popup</span><span>solutions banner</span></div>
+        </div>
+        <div class="form-fields-count">4 fields</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Visible to visitor</div>
+            <div class="f-row"><span class="f-name">Full name</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Work email</span><span class="f-type">email</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Phone number</span><span class="f-type">tel</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Company name</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Hidden — auto-captured</div>
+            <div class="h-cat">UTM parameters</div>
+            <div class="f-row"><span class="f-name">utm_source</span><span class="f-sample">google</span></div>
+            <div class="f-row"><span class="f-name">utm_medium</span><span class="f-sample">cpc</span></div>
+            <div class="f-row"><span class="f-name">utm_campaign</span><span class="f-sample">grc_q4</span></div>
+            <div class="h-cat">Page context</div>
+            <div class="f-row"><span class="f-name">page_url</span><span class="f-sample">/solutions/risk</span></div>
+            <div class="f-row"><span class="f-name">referrer_url</span><span class="f-sample">google.com</span></div>
+            <div class="f-row"><span class="f-name">form_name</span><span class="f-sample">solutions_banner</span></div>
+            <div class="h-cat">Session + device</div>
+            <div class="f-row"><span class="f-name">session_id</span><span class="f-sample">a8f3c...</span></div>
+            <div class="f-row"><span class="f-name">pages_viewed</span><span class="f-sample">4</span></div>
+            <div class="f-row"><span class="f-name">device_type</span><span class="f-sample">desktop</span></div>
+          </div>
+        </div>
+        <div class="form-note">CTA label: "Talk to an expert" — not "Submit". GRC buyers evaluate seriously; signal expertise.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">02</div>
+        <div class="form-info">
+          <h3>Footer form</h3>
+          <p>Passive capture for visitors who scroll past everything. Low commitment entry point.</p>
+          <div class="form-placement"><span>every page — site-wide</span></div>
+        </div>
+        <div class="form-fields-count">1–2 fields</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Visible to visitor</div>
+            <div class="f-row"><span class="f-name">Work email</span><span class="f-type">email</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Full name</span><span class="f-type">text</span><span class="f-badge opt">optional</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Hidden — auto-captured</div>
+            <div class="h-cat">UTM parameters</div>
+            <div class="f-row"><span class="f-name">utm_source</span><span class="f-sample">linkedin</span></div>
+            <div class="f-row"><span class="f-name">utm_medium</span><span class="f-sample">social</span></div>
+            <div class="h-cat">Page context</div>
+            <div class="f-row"><span class="f-name">page_url</span><span class="f-sample">/blog/iso-27001</span></div>
+            <div class="f-row"><span class="f-name">referrer_url</span><span class="f-sample">linkedin.com</span></div>
+            <div class="f-row"><span class="f-name">form_name</span><span class="f-sample">site_footer</span></div>
+            <div class="h-cat">Session + device</div>
+            <div class="f-row"><span class="f-name">pages_viewed</span><span class="f-sample">1</span></div>
+            <div class="f-row"><span class="f-name">device_type</span><span class="f-sample">mobile</span></div>
+          </div>
+        </div>
+        <div class="form-note">CTA label: "Stay updated" or "Get GRC insights". Enters nurture — not sales pipeline.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">03</div>
+        <div class="form-info">
+          <h3>Book a demo</h3>
+          <p>Full lead qualification. The visitor has committed — earn more data here.</p>
+          <div class="form-placement"><span>/book-a-demo</span></div>
+        </div>
+        <div class="form-fields-count">7–8 fields</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Visible to visitor</div>
+            <div class="f-row"><span class="f-name">First / last name</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Work email</span><span class="f-type">email</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Phone number</span><span class="f-type">tel</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Company name</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Job title</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Company size</span><span class="f-type">select</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">What are you looking for?</span><span class="f-type">textarea</span><span class="f-badge opt">optional</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Hidden — auto-captured</div>
+            <div class="h-cat">Page context</div>
+            <div class="f-row"><span class="f-name">page_url</span><span class="f-sample">/book-a-demo</span></div>
+            <div class="f-row"><span class="f-name">referrer_url</span><span class="f-sample">/pricing</span></div>
+            <div class="f-row"><span class="f-name">form_name</span><span class="f-sample">book_a_demo</span></div>
+            <div class="h-cat">Session + device</div>
+            <div class="f-row"><span class="f-name">pages_viewed</span><span class="f-sample">7</span></div>
+            <div class="f-row"><span class="f-name">visit_count</span><span class="f-sample">3</span></div>
+            <div class="f-row"><span class="f-name">device_type</span><span class="f-sample">desktop</span></div>
+          </div>
+        </div>
+        <div class="form-note">Company size feeds firmographic scoring directly — see Stage 4.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">04</div>
+        <div class="form-info">
+          <h3>Contact us</h3>
+          <p>General inquiry with routing. The dropdown drives which team gets the submission.</p>
+          <div class="form-placement"><span>/contact-us</span></div>
+        </div>
+        <div class="form-fields-count">7–8 fields</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Visible to visitor</div>
+            <div class="f-row"><span class="f-name">First / last name</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Work email</span><span class="f-type">email</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Phone number</span><span class="f-type">tel</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Company name</span><span class="f-type">text</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Job title</span><span class="f-type">text</span><span class="f-badge opt">optional</span></div>
+            <div class="f-row"><span class="f-name">Inquiry type</span><span class="f-type">select</span><span class="f-badge req">required</span></div>
+            <div class="f-row"><span class="f-name">Message</span><span class="f-type">textarea</span><span class="f-badge req">required</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Hidden — auto-captured</div>
+            <div class="h-cat">Page context</div>
+            <div class="f-row"><span class="f-name">page_url</span><span class="f-sample">/contact-us</span></div>
+            <div class="f-row"><span class="f-name">referrer_url</span><span class="f-sample">/about</span></div>
+            <div class="f-row"><span class="f-name">form_name</span><span class="f-sample">contact_us</span></div>
+            <div class="h-cat">Session + device</div>
+            <div class="f-row"><span class="f-name">pages_viewed</span><span class="f-sample">3</span></div>
+            <div class="f-row"><span class="f-name">device_type</span><span class="f-sample">desktop</span></div>
+          </div>
+        </div>
+        <div class="form-note">Inquiry type: Request a demo / General / Partnership / Support / Media. Routes to different teams — see Stage 5.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="section-label">Data pipeline</div>
+  <div class="pipeline-track">
+    <div class="pipe-step" data-stage="1" onclick="toggleStage(this)"><div class="pipe-dot">1</div><div class="pipe-name">Capture</div><div class="pipe-sub">JS tracking</div></div>
+    <div class="pipe-step" data-stage="2" onclick="toggleStage(this)"><div class="pipe-dot">2</div><div class="pipe-name">Validate</div><div class="pipe-sub">Clean + enrich</div></div>
+    <div class="pipe-step" data-stage="3" onclick="toggleStage(this)"><div class="pipe-dot">3</div><div class="pipe-name">Store</div><div class="pipe-sub">CRM + DB</div></div>
+    <div class="pipe-step" data-stage="4" onclick="toggleStage(this)"><div class="pipe-dot">4</div><div class="pipe-name">Score</div><div class="pipe-sub">Prioritize leads</div></div>
+    <div class="pipe-step" data-stage="5" onclick="toggleStage(this)"><div class="pipe-dot">5</div><div class="pipe-name">Route</div><div class="pipe-sub">Assign + SLA</div></div>
+  </div>
+
+  <div class="stage-panel" data-panel="1">
+    <div class="stage-head"><h2>Client-side capture</h2><p>A lightweight JavaScript snippet on every page. Reads URL parameters on load, persists them in a first-party cookie, and injects hidden fields on submit.</p></div>
+    <div class="stage-body">
+<pre class="code"><span class="cm">// Page load → read UTMs from URL → store in first-party cookie</span>
+<span class="kw">function</span> <span class="fn">captureParams</span>() {
+  <span class="kw">const</span> <span class="vr">params</span> = <span class="kw">new</span> URLSearchParams(location.search);
+  <span class="kw">const</span> <span class="vr">keys</span> = [<span class="str">'utm_source'</span>,<span class="str">'utm_medium'</span>,<span class="str">'utm_campaign'</span>,<span class="str">'utm_term'</span>,<span class="str">'utm_content'</span>];
+  <span class="vr">keys</span>.forEach(<span class="vr">k</span> => {
+    <span class="kw">const</span> <span class="vr">v</span> = <span class="vr">params</span>.get(<span class="vr">k</span>);
+    <span class="kw">if</span> (<span class="vr">v</span>) <span class="fn">setCookie</span>(<span class="vr">k</span>, <span class="vr">v</span>, 90);
+  });
+  <span class="kw">if</span> (!<span class="fn">getCookie</span>(<span class="str">'first_touch_src'</span>))
+    <span class="fn">setCookie</span>(<span class="str">'first_touch_src'</span>, <span class="vr">params</span>.get(<span class="str">'utm_source'</span>) || <span class="str">'direct'</span>, 90);
+}
+
+<span class="cm">// Form submit → inject hidden fields → POST</span>
+<span class="kw">function</span> <span class="fn">onSubmit</span>(<span class="vr">form</span>) {
+  <span class="kw">const</span> <span class="vr">hidden</span> = {
+    ...<span class="fn">getAllCookies</span>(),
+    page_url: location.pathname,
+    referrer_url: document.referrer,
+    session_id: <span class="fn">getSessionId</span>(),
+    form_name: <span class="vr">form</span>.dataset.formName,
+  };
+  Object.entries(<span class="vr">hidden</span>).forEach(([<span class="vr">k</span>,<span class="vr">v</span>]) => {
+    <span class="kw">const</span> <span class="vr">el</span> = document.createElement(<span class="str">'input'</span>);
+    <span class="vr">el</span>.type=<span class="str">'hidden'</span>; <span class="vr">el</span>.name=<span class="vr">k</span>; <span class="vr">el</span>.value=<span class="vr">v</span>||<span class="str">''</span>;
+    <span class="vr">form</span>.appendChild(<span class="vr">el</span>);
+  });
+}</pre>
+      <div class="note"><strong>Cookie strategy:</strong> UTM cookies expire at 90 days for multi-touch attribution. Session ID expires on browser close. First-touch source is write-once.</div>
+    </div>
+  </div>
+
+  <div class="stage-panel" data-panel="2">
+    <div class="stage-head"><h2>Server validation</h2><p>Every submission passes through four checks before it touches the CRM.</p></div>
+    <div class="stage-body">
+      <div class="v-grid">
+        <div class="v-card"><h4>Email validation</h4><ul><li>Block personal domains (gmail, yahoo, outlook)</li><li>MX record lookup</li><li>Disposable email detection</li></ul></div>
+        <div class="v-card"><h4>Data enrichment</h4><ul><li>IP → geolocation (MaxMind)</li><li>Email domain → company data</li><li>Phone formatting to E.164</li></ul></div>
+        <div class="v-card"><h4>Spam / bot detection</h4><ul><li>Honeypot field</li><li>Submission speed check (&lt;3s = bot)</li><li>Rate limit: 5 / IP / hour</li></ul></div>
+        <div class="v-card"><h4>Deduplication</h4><ul><li>Match key: email address</li><li>Existing lead → update + log submission</li><li>New email → create lead</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage-panel" data-panel="3">
+    <div class="stage-head"><h2>CRM + database schema</h2><p>Three normalized tables plus a scoring ledger. One lead can have many submissions.</p></div>
+    <div class="stage-body">
+      <div class="tabs">
+        <button class="tab on" onclick="switchTab(this,'t1')">leads</button>
+        <button class="tab" onclick="switchTab(this,'t2')">form_submissions</button>
+        <button class="tab" onclick="switchTab(this,'t3')">tracking_data</button>
+        <button class="tab" onclick="switchTab(this,'t4')">lead_scores</button>
+      </div>
+      <div class="tab-panel on" id="t1">
+        <table class="s-table"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Notes</th></tr></thead><tbody>
+          <tr><td>id</td><td class="dtype">UUID</td><td><span class="key-badge key-pk">PK</span></td><td>Auto-generated</td></tr>
+          <tr><td>email</td><td class="dtype">VARCHAR(255)</td><td><span class="key-badge key-idx">UNIQUE</span></td><td>Dedup key</td></tr>
+          <tr><td>company_size</td><td class="dtype">ENUM</td><td></td><td>'1-50'…'1000+'</td></tr>
+          <tr><td>lead_score</td><td class="dtype">INT</td><td><span class="key-badge key-idx">IDX</span></td><td>Composite 0–100</td></tr>
+          <tr><td>lead_status</td><td class="dtype">ENUM</td><td><span class="key-badge key-idx">IDX</span></td><td>'new'…'disqualified'</td></tr>
+          <tr><td>assigned_to</td><td class="dtype">VARCHAR(100)</td><td></td><td>Sales rep email</td></tr>
+        </tbody></table>
+      </div>
+      <div class="tab-panel" id="t2">
+        <table class="s-table"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Notes</th></tr></thead><tbody>
+          <tr><td>id</td><td class="dtype">UUID</td><td><span class="key-badge key-pk">PK</span></td><td></td></tr>
+          <tr><td>lead_id</td><td class="dtype">UUID</td><td><span class="key-badge key-fk">FK → leads</span></td><td></td></tr>
+          <tr><td>form_id</td><td class="dtype">VARCHAR(50)</td><td><span class="key-badge key-idx">IDX</span></td><td>quick_capture, footer_form...</td></tr>
+          <tr><td>form_name</td><td class="dtype">VARCHAR(100)</td><td></td><td>Placement identifier</td></tr>
+          <tr><td>raw_payload</td><td class="dtype">JSONB</td><td></td><td>Full POST body</td></tr>
+        </tbody></table>
+        <div class="tip">One lead → many submissions. Subscribe via footer, book a demo later — both link to the same lead_id.</div>
+      </div>
+      <div class="tab-panel" id="t3">
+        <table class="s-table"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Notes</th></tr></thead><tbody>
+          <tr><td>id</td><td class="dtype">UUID</td><td><span class="key-badge key-pk">PK</span></td><td></td></tr>
+          <tr><td>submission_id</td><td class="dtype">UUID</td><td><span class="key-badge key-fk">FK</span></td><td></td></tr>
+          <tr><td>utm_source</td><td class="dtype">VARCHAR(100)</td><td><span class="key-badge key-idx">IDX</span></td><td></td></tr>
+          <tr><td>first_touch_src</td><td class="dtype">VARCHAR(100)</td><td></td><td>Original acquisition</td></tr>
+          <tr><td>last_touch_src</td><td class="dtype">VARCHAR(100)</td><td></td><td>Converting source</td></tr>
+        </tbody></table>
+      </div>
+      <div class="tab-panel" id="t4">
+        <table class="s-table"><thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Notes</th></tr></thead><tbody>
+          <tr><td>id</td><td class="dtype">UUID</td><td><span class="key-badge key-pk">PK</span></td><td></td></tr>
+          <tr><td>lead_id</td><td class="dtype">UUID</td><td><span class="key-badge key-fk">FK</span></td><td></td></tr>
+          <tr><td>category</td><td class="dtype">ENUM</td><td></td><td>form_intent, firmographic...</td></tr>
+          <tr><td>points</td><td class="dtype">INT</td><td></td><td></td></tr>
+        </tbody></table>
+        <div class="tip">lead_score on leads = SUM(points) across all lead_scores rows. Fully auditable.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage-panel" data-panel="4">
+    <div class="stage-head"><h2>Lead scoring engine</h2><p>Composite score 0–100 across four dimensions.</p></div>
+    <div class="stage-body">
+      <div class="score-cols">
+        <div>
+          <div class="score-group"><div class="score-label">Form intent</div>
+            <div class="score-row"><span>Book a demo form</span><span class="score-pts hi">+30</span><div class="score-bar"><span style="width:100%"></span></div></div>
+            <div class="score-row"><span>Quick capture</span><span class="score-pts md">+15</span><div class="score-bar"><span style="width:50%"></span></div></div>
+            <div class="score-row"><span>Footer form</span><span class="score-pts lo">+5</span><div class="score-bar"><span style="width:17%"></span></div></div>
+          </div>
+          <div class="score-group"><div class="score-label">Firmographic</div>
+            <div class="score-row"><span>Company size: 1000+</span><span class="score-pts hi">+25</span><div class="score-bar"><span style="width:100%"></span></div></div>
+            <div class="score-row"><span>Company size: 51–200</span><span class="score-pts md">+10</span><div class="score-bar"><span style="width:40%"></span></div></div>
+          </div>
+        </div>
+        <div>
+          <div class="score-group"><div class="score-label">Job title</div>
+            <div class="score-row"><span>CISO / VP Risk</span><span class="score-pts hi">+25</span><div class="score-bar"><span style="width:100%"></span></div></div>
+            <div class="score-row"><span>Other / unknown</span><span class="score-pts lo">+5</span><div class="score-bar"><span style="width:20%"></span></div></div>
+          </div>
+          <div class="score-group"><div class="score-label">Behavioral</div>
+            <div class="score-row"><span>Visited pricing page</span><span class="score-pts hi">+10</span><div class="score-bar"><span style="width:50%"></span></div></div>
+            <div class="score-row"><span>Return visitor</span><span class="score-pts md">+7</span><div class="score-bar"><span style="width:35%"></span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="note"><strong>Max score:</strong> 30+25+25+20 = 100. A CISO from a 1000+ company who books a demo after visiting pricing scores 90.</div>
+    </div>
+  </div>
+
+  <div class="stage-panel" data-panel="5">
+    <div class="stage-head"><h2>Sales routing</h2><p>Score + form type + inquiry type determine assignment and SLA.</p></div>
+    <div class="stage-body">
+      <div class="route-tier"><div class="route-range" style="color:#16a34a">80–100<small>score</small></div><div class="route-detail"><h4>Enterprise AE — immediate</h4><p>Auto-assign, instant Slack alert, SLA: 1 hour.</p></div></div>
+      <div class="route-tier"><div class="route-range" style="color:#2563eb">50–79<small>score</small></div><div class="route-detail"><h4>SDR follow-up — 4 hours</h4><p>Discovery call assigned. SDR fills qualification gaps.</p></div></div>
+      <div class="route-tier"><div class="route-range" style="color:#ca8a04">30–49<small>score</small></div><div class="route-detail"><h4>Nurture sequence — automated</h4><p>6-email drip. Re-scored on engagement.</p></div></div>
+      <div class="route-tier"><div class="route-range" style="color:var(--ink-3)">0–29<small>score</small></div><div class="route-detail"><h4>Marketing drip — long-term</h4><p>Monthly newsletter only.</p></div></div>
+      <div class="route-specials">
+        <div class="route-special"><h4>Contact → support</h4><p>Bypasses scoring. Routes to support inbox as a ticket.</p></div>
+        <div class="route-special"><h4>Contact → partnership</h4><p>Bypasses scoring. Routes to BD team.</p></div>
+        <div class="route-special"><h4>Contact → media</h4><p>Bypasses scoring. Auto-replies with press kit.</p></div>
+      </div>
+    </div>
+  </div>
+
+</section>
+
+<!-- ============================================================= -->
+<!-- TAB 01 — LAYER 1: INSTANT CAPTURE                              -->
+<!-- ============================================================= -->
+<section class="tabpanel" id="tab-layer1">
+  <div class="tab-intro">
+    <div class="section-label">Marketing automation — layer 1</div>
+    <h2>Instant capture automation</h2>
+    <p>Fires in the same second the form posts — before scoring, before a human looks at it. These run off <code>form_id</code> alone, so they never wait on Stage 4.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat-cell"><div class="num">4</div><div class="lbl">automations</div></div>
+    <div class="stat-cell"><div class="num">0–5s</div><div class="lbl">typical delay</div></div>
+    <div class="stat-cell"><div class="num">100%</div><div class="lbl">of submissions</div></div>
+    <div class="stat-cell"><div class="num">0</div><div class="lbl">dependency on scoring</div></div>
+  </div>
+
+  <div class="form-list">
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">01</div>
+        <div class="form-info">
+          <h3>Instant confirmation email</h3>
+          <p>Transactional email confirming receipt, sent regardless of which form was used.</p>
+          <div class="form-placement"><span>all 4 forms</span><span>trigger: submit</span></div>
+        </div>
+        <div class="form-fields-count">instant</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Trigger</span><span class="f-sample">any form submit</span></div>
+            <div class="f-row"><span class="f-name">Delay</span><span class="f-sample">0–5 seconds</span></div>
+            <div class="f-row"><span class="f-name">Channel</span><span class="f-sample">transactional email</span></div>
+            <div class="f-row"><span class="f-name">Personalization</span><span class="f-sample">by form_id</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Message per form</div>
+            <div class="f-row"><span class="f-name">quick_capture</span><span class="f-sample">"Expert reaches out in 1 day"</span></div>
+            <div class="f-row"><span class="f-name">demo_form</span><span class="f-sample">"Here's your calendar link"</span></div>
+            <div class="f-row"><span class="f-name">footer_form</span><span class="f-sample">"You're subscribed"</span></div>
+            <div class="f-row"><span class="f-name">contact_form</span><span class="f-sample">"Routed to [team]"</span></div>
+          </div>
+        </div>
+        <div class="form-note">Tools: SendGrid, Postmark, or native HubSpot/ActiveCampaign workflow email. Silence reads as immaturity to a compliance-focused buyer — this closes that gap immediately.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">02</div>
+        <div class="form-info">
+          <h3>Internal team alert</h3>
+          <p>Slack/Teams notification with a lead snapshot, restricted to high-intent forms only.</p>
+          <div class="form-placement"><span>demo_form</span><span>contact_form (demo inquiry)</span></div>
+        </div>
+        <div class="form-fields-count">instant</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Trigger</span><span class="f-sample">form_id = demo_form</span></div>
+            <div class="f-row"><span class="f-name">Channel</span><span class="f-sample">Slack incoming webhook</span></div>
+            <div class="f-row"><span class="f-name">Payload</span><span class="f-sample">name, company, page_url</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why scoped this narrow</div>
+            <div class="f-row"><span class="f-name">Reason</span><span class="f-sample">avoid alert fatigue</span></div>
+            <div class="f-row"><span class="f-name">Excluded</span><span class="f-sample">footer_form, quick_capture</span></div>
+          </div>
+        </div>
+        <div class="form-note">Tools: Slack webhook, Zapier/Make, or the CRM's native notification. SDRs respond faster with full context without opening the CRM first.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">03</div>
+        <div class="form-info">
+          <h3>Calendar auto-send</h3>
+          <p>Self-book scheduling link sent alongside the confirmation email for demo requests.</p>
+          <div class="form-placement"><span>demo_form only</span></div>
+        </div>
+        <div class="form-fields-count">instant</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Trigger</span><span class="f-sample">form_id = demo_form</span></div>
+            <div class="f-row"><span class="f-name">Tool</span><span class="f-sample">Calendly / HubSpot Meetings</span></div>
+            <div class="f-row"><span class="f-name">Attached to</span><span class="f-sample">confirmation email</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Impact</div>
+            <div class="f-row"><span class="f-name">Removes</span><span class="f-sample">scheduling back-and-forth</span></div>
+            <div class="f-row"><span class="f-name">Shortens</span><span class="f-sample">time-to-first-meeting</span></div>
+          </div>
+        </div>
+        <div class="form-note">Prospect can self-book the moment they're most interested — right after submitting — instead of waiting for a rep's reply.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">04</div>
+        <div class="form-info">
+          <h3>Fallback CRM task creation</h3>
+          <p>A "review new lead" task is created the moment any lead record is created — before scoring completes.</p>
+          <div class="form-placement"><span>all forms</span><span>safety net</span></div>
+        </div>
+        <div class="form-fields-count">instant</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Trigger</span><span class="f-sample">new lead record created</span></div>
+            <div class="f-row"><span class="f-name">Action</span><span class="f-sample">task assigned to routing owner</span></div>
+            <div class="f-row"><span class="f-name">Due</span><span class="f-sample">same day</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why it exists</div>
+            <div class="f-row"><span class="f-name">Covers</span><span class="f-sample">scoring engine delay/outage</span></div>
+            <div class="f-row"><span class="f-name">Guarantees</span><span class="f-sample">nothing sits untouched</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="note"><strong>Design principle:</strong> Layer 1 automations run off <code>form_id</code> and <code>inquiry_type</code> alone — never off <code>lead_score</code>. That keeps them firing even if Stage 4 scoring is delayed or down.</div>
+</section>
+
+<!-- ============================================================= -->
+<!-- TAB 02 — LAYER 2: CRM NURTURE BRANCHING                        -->
+<!-- ============================================================= -->
+<section class="tabpanel" id="tab-layer2">
+  <div class="tab-intro">
+    <div class="section-label">Marketing automation — layer 2</div>
+    <h2>CRM nurture branching</h2>
+    <p>Once the record lands in CRM, branching logic decides which sequence a lead enters — based on source, content, and behavior. Nothing here needs new hidden fields; it's logic applied to what Stage 1 already captured.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat-cell"><div class="num">4</div><div class="lbl">branching rules</div></div>
+    <div class="stat-cell"><div class="num">0</div><div class="lbl">new fields required</div></div>
+    <div class="stat-cell"><div class="num">form_name</div><div class="lbl">primary branch key</div></div>
+  </div>
+
+  <div class="form-list">
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">01</div>
+        <div class="form-info">
+          <h3>Segment nurture by content topic</h3>
+          <p>The blog post or page a visitor converted from decides which nurture track they enter.</p>
+          <div class="form-placement"><span>trigger: form_name + landing_page</span></div>
+        </div>
+        <div class="form-fields-count">CRM workflow</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Example branches</div>
+            <div class="f-row"><span class="f-name">Landed via SOC 2 checklist</span><span class="f-sample">SOC2 nurture track</span></div>
+            <div class="f-row"><span class="f-name">Landed via ISO 27001 guide</span><span class="f-sample">ISO nurture track</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Setup</div>
+            <div class="f-row"><span class="f-name">Property</span><span class="f-sample">content_topic (derived)</span></div>
+            <div class="f-row"><span class="f-name">Tools</span><span class="f-sample">HubSpot / ActiveCampaign</span></div>
+          </div>
+        </div>
+        <div class="form-note">Relevance beats generic drip — GRC buyers evaluate specific frameworks, so speak to the one they showed up for.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">02</div>
+        <div class="form-info">
+          <h3>Behavioral branching beyond the form</h3>
+          <p>What a lead does after converting reveals more intent than the form itself.</p>
+          <div class="form-placement"><span>trigger: post-submit page visits</span></div>
+        </div>
+        <div class="form-fields-count">CRM workflow</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Example branches</div>
+            <div class="f-row"><span class="f-name">Visits pricing page</span><span class="f-sample">ROI calculator + case studies</span></div>
+            <div class="f-row"><span class="f-name">Visits competitor comparison</span><span class="f-sample">head-to-head content</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Data source</div>
+            <div class="f-row"><span class="f-name">Field</span><span class="f-sample">pages_viewed history</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">03</div>
+        <div class="form-info">
+          <h3>AI extraction &amp; sentiment on open text</h3>
+          <p>The free-text fields on the demo and contact forms get parsed automatically.</p>
+          <div class="form-placement"><span>trigger: message field filled</span></div>
+        </div>
+        <div class="form-fields-count">AI block</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Extracted signals</div>
+            <div class="f-row"><span class="f-name">Framework mentioned</span><span class="f-sample">SOC2 / ISO / HIPAA</span></div>
+            <div class="f-row"><span class="f-name">Urgency language</span><span class="f-sample">"audit deadline", "urgent"</span></div>
+            <div class="f-row"><span class="f-name">Team size hints</span><span class="f-sample">free-text mentions</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Setup</div>
+            <div class="f-row"><span class="f-name">Tools</span><span class="f-sample">Claude / OpenAI API call</span></div>
+            <div class="f-row"><span class="f-name">Output</span><span class="f-sample">CRM custom properties</span></div>
+          </div>
+        </div>
+        <div class="form-note">An SDR opening the record sees "mentions urgent audit deadline, ISO 27001" instead of reading raw text — speeds up prep and prioritization.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">04</div>
+        <div class="form-info">
+          <h3>Progressive profiling</h3>
+          <p>Returning visitors who already have an email on file get asked for one more detail — never re-asked what's already known.</p>
+          <div class="form-placement"><span>trigger: known email, new session</span></div>
+        </div>
+        <div class="form-fields-count">CRM workflow</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">First fill (footer)</span><span class="f-sample">email only</span></div>
+            <div class="f-row"><span class="f-name">Second touch</span><span class="f-sample">asks job title</span></div>
+            <div class="f-row"><span class="f-name">Third touch</span><span class="f-sample">asks company size</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why</div>
+            <div class="f-row"><span class="f-name">Fills</span><span class="f-sample">scoring gaps over time</span></div>
+            <div class="f-row"><span class="f-name">Cost</span><span class="f-sample">zero added form friction</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================= -->
+<!-- TAB 03 — LAYER 3: CONTENT & ORGANIC REACH                      -->
+<!-- ============================================================= -->
+<section class="tabpanel" id="tab-layer3">
+  <div class="tab-intro">
+    <div class="section-label">Marketing automation — layer 3</div>
+    <h2>Content repurposing &amp; organic amplification</h2>
+    <p>With no paid spend, reach compounds through how far each piece of content travels — not through budget. SEO leads with 748% ROI, ahead of email at 261%.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat-cell"><div class="num">748%</div><div class="lbl">SEO channel ROI</div></div>
+    <div class="stat-cell"><div class="num">261%</div><div class="lbl">email channel ROI</div></div>
+    <div class="stat-cell"><div class="num">2+</div><div class="lbl">touchpoints per asset</div></div>
+  </div>
+
+  <div class="form-list">
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">01</div>
+        <div class="form-info">
+          <h3>One asset, multiple touchpoints</h3>
+          <p>Every published piece is automatically repackaged for at least two other channels.</p>
+          <div class="form-placement"><span>trigger: CMS publish event</span></div>
+        </div>
+        <div class="form-fields-count">automated draft</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Repackaged into</div>
+            <div class="f-row"><span class="f-name">LinkedIn post</span><span class="f-sample">auto-drafted, human-reviewed</span></div>
+            <div class="f-row"><span class="f-name">Newsletter blurb</span><span class="f-sample">auto-drafted, human-reviewed</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Tools</div>
+            <div class="f-row"><span class="f-name">Automation</span><span class="f-sample">Zapier / Make + AI drafting step</span></div>
+          </div>
+        </div>
+        <div class="form-note">Repurposing the same asset across channels multiplies reach without multiplying production effort.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">02</div>
+        <div class="form-info">
+          <h3>AEO/GEO-aware publishing checks</h3>
+          <p>An automated lint pass runs on every draft to check what makes content citable by AI answer engines, not just rankable by Google.</p>
+          <div class="form-placement"><span>trigger: content drafted</span></div>
+        </div>
+        <div class="form-fields-count">automated check</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Checklist</div>
+            <div class="f-row"><span class="f-name">Schema markup</span><span class="f-sample">present</span></div>
+            <div class="f-row"><span class="f-name">Header structure</span><span class="f-sample">clear, direct-answer paragraphs</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Ties into</div>
+            <div class="f-row"><span class="f-name">Project</span><span class="f-sample">your AEO/GEO citation engine</span></div>
+          </div>
+        </div>
+        <div class="tip">Once the GEO engine is live, "arrived via AI citation" becomes a trackable source worth a scoring bump — AI-referral traffic tends to carry higher intent than regular search traffic.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">03</div>
+        <div class="form-info">
+          <h3>Backlink &amp; referral tracking</h3>
+          <p>New referring domains get surfaced automatically instead of staying buried in raw data.</p>
+          <div class="form-placement"><span>trigger: new external referrer_url</span></div>
+        </div>
+        <div class="form-fields-count">weekly digest</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Source</span><span class="f-sample">referrer_url (already captured)</span></div>
+            <div class="f-row"><span class="f-name">Output</span><span class="f-sample">"new domain X sent Y leads"</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Follow-up action</div>
+            <div class="f-row"><span class="f-name">If productive</span><span class="f-sample">pursue guest post / co-marketing</span></div>
+          </div>
+        </div>
+        <div class="form-note">Turns a hidden field you already capture into a lightweight organic-BD signal, at zero extra tooling cost.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">04</div>
+        <div class="form-info">
+          <h3>Source-based lead segmentation</h3>
+          <p>Organic channels get named and reported on individually instead of collapsing into "other."</p>
+          <div class="form-placement"><span>trigger: utm_source without ad spend</span></div>
+        </div>
+        <div class="form-fields-count">CRM reporting</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Tagged values</div>
+            <div class="f-row"><span class="f-name">organic-search</span><span class="f-sample">google, bing</span></div>
+            <div class="f-row"><span class="f-name">organic-social</span><span class="f-sample">linkedin, twitter</span></div>
+            <div class="f-row"><span class="f-name">referral</span><span class="f-sample">external site links</span></div>
+            <div class="f-row"><span class="f-name">newsletter</span><span class="f-sample">email list clicks</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why it matters</div>
+            <div class="f-row"><span class="f-name">Without this</span><span class="f-sample">can't compare channels</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================= -->
+<!-- TAB 04 — LAYER 4: RETENTION & ADVOCACY                         -->
+<!-- ============================================================= -->
+<section class="tabpanel" id="tab-layer4">
+  <div class="tab-intro">
+    <div class="section-label">Marketing automation — layer 4</div>
+    <h2>Retention &amp; advocacy automation</h2>
+    <p>Existing customers are the cheapest source of new organic reach — reviews, referrals, and case studies compound without any acquisition spend.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat-cell"><div class="num">3</div><div class="lbl">automations</div></div>
+    <div class="stat-cell"><div class="num">$0</div><div class="lbl">acquisition spend</div></div>
+    <div class="stat-cell"><div class="num">post-sale</div><div class="lbl">trigger window</div></div>
+  </div>
+
+  <div class="form-list">
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">01</div>
+        <div class="form-info">
+          <h3>Review-request automation</h3>
+          <p>Automated G2/Capterra review request sent after onboarding completes or a support ticket closes well.</p>
+          <div class="form-placement"><span>trigger: onboarding complete</span></div>
+        </div>
+        <div class="form-fields-count">scheduled email</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Delay</span><span class="f-sample">X days post-onboarding</span></div>
+            <div class="f-row"><span class="f-name">Channel</span><span class="f-sample">email with direct G2 link</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why it matters</div>
+            <div class="f-row"><span class="f-name">GRC buyers</span><span class="f-sample">research vendors on G2 heavily</span></div>
+          </div>
+        </div>
+        <div class="form-note">Review volume and recency directly affect whether you make the shortlist at all in a compliance-tool evaluation.</div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">02</div>
+        <div class="form-info">
+          <h3>Referral program auto-enrollment</h3>
+          <p>Satisfied customers get automatically enrolled into a referral ask sequence.</p>
+          <div class="form-placement"><span>trigger: NPS threshold or renewal</span></div>
+        </div>
+        <div class="form-fields-count">CRM workflow</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Trigger</span><span class="f-sample">NPS above threshold</span></div>
+            <div class="f-row"><span class="f-name">Or</span><span class="f-sample">contract renewal event</span></div>
+            <div class="f-row"><span class="f-name">Offer</span><span class="f-sample">simple referral incentive</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why</div>
+            <div class="f-row"><span class="f-name">Turns</span><span class="f-sample">customers into distribution</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">03</div>
+        <div class="form-info">
+          <h3>Case study pipeline flagging</h3>
+          <p>High-scoring closed-won deals get automatically flagged for a case study outreach task.</p>
+          <div class="form-placement"><span>trigger: closed-won + score 80–100</span></div>
+        </div>
+        <div class="form-fields-count">auto-task</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">How it works</div>
+            <div class="f-row"><span class="f-name">Condition</span><span class="f-sample">deal_stage = closed_won</span></div>
+            <div class="f-row"><span class="f-name">And</span><span class="f-sample">lead_score was 80–100 at conversion</span></div>
+            <div class="f-row"><span class="f-name">Action</span><span class="f-sample">task created for marketing</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Why</div>
+            <div class="f-row"><span class="f-name">Otherwise</span><span class="f-sample">only happens if someone remembers</span></div>
+          </div>
+        </div>
+        <div class="form-note">Automation makes case-study sourcing systematic instead of relying on someone remembering to ask.</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================= -->
+<!-- TAB 05 — LAYER 5: EMAIL NURTURE                                -->
+<!-- ============================================================= -->
+<section class="tabpanel" id="tab-layer5">
+  <div class="tab-intro">
+    <div class="section-label">Marketing automation — layer 5</div>
+    <h2>Email nurture cadence</h2>
+    <p>The actual send calendar and personalization logic behind the sequences Layer 2 routes leads into.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat-cell"><div class="num">21</div><div class="lbl">day cadence</div></div>
+    <div class="stat-cell"><div class="num">8</div><div class="lbl">touchpoints</div></div>
+    <div class="stat-cell"><div class="num">261%</div><div class="lbl">channel ROI</div></div>
+  </div>
+
+  <div class="section-label">Standard multi-touch cadence — demo requests</div>
+  <table class="s-table" style="margin-bottom:28px">
+    <thead><tr><th>Day</th><th>Channel</th><th>Action</th></tr></thead>
+    <tbody>
+      <tr><td>Day 0</td><td class="dtype">email + task</td><td>Welcome email, plus a call task for the assigned rep</td></tr>
+      <tr><td>Day 3</td><td class="dtype">email</td><td>Solution brief tailored to their stated framework</td></tr>
+      <tr><td>Day 6</td><td class="dtype">SMS</td><td>Thank-you + offer to schedule time</td></tr>
+      <tr><td>Day 9</td><td class="dtype">email</td><td>Relevant case study</td></tr>
+      <tr><td>Day 12</td><td class="dtype">call</td><td>Rep attempts a call</td></tr>
+      <tr><td>Day 15</td><td class="dtype">email</td><td>Live demo invitation</td></tr>
+      <tr><td>Day 18</td><td class="dtype">SMS</td><td>Reminder</td></tr>
+      <tr><td>Day 21</td><td class="dtype">email + call</td><td>Re-engagement email plus a final call attempt</td></tr>
+    </tbody>
+  </table>
+
+  <div class="form-list">
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">01</div>
+        <div class="form-info">
+          <h3>AI-personalized send time &amp; variants</h3>
+          <p>Send time is chosen per contact based on past open behavior; 2–3 content variants rotate per segment.</p>
+          <div class="form-placement"><span>applies to all sequences</span></div>
+        </div>
+        <div class="form-fields-count">AI layer</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">What it does</div>
+            <div class="f-row"><span class="f-name">Send time</span><span class="f-sample">optimized per contact</span></div>
+            <div class="f-row"><span class="f-name">Content</span><span class="f-sample">2–3 AI-generated variants</span></div>
+          </div>
+          <div class="hidden-fields">
+            <div class="fields-title">Signal</div>
+            <div class="f-row"><span class="f-name">Adoption</span><span class="f-sample">~95% of B2B marketers use AI here</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-item" onclick="toggleForm(this)">
+      <div class="form-head">
+        <div class="form-num">02</div>
+        <div class="form-info">
+          <h3>Mobile-first formatting</h3>
+          <p>Most B2B decision-makers scan email on mobile first — formatting rules follow from that.</p>
+          <div class="form-placement"><span>applies to all sequences</span></div>
+        </div>
+        <div class="form-fields-count">template rule</div>
+        <div class="form-toggle"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      </div>
+      <div class="form-body">
+        <div class="fields-wrap">
+          <div class="visible-fields">
+            <div class="fields-title">Rules</div>
+            <div class="f-row"><span class="f-name">Subject lines</span><span class="f-sample">short, front-loaded value</span></div>
+            <div class="f-row"><span class="f-name">First line</span><span class="f-sample">carries the core message</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<footer>4 templates · 6+ placements · 5 pipeline stages · 5 automation layers</footer>
+
+<script>
+function switchMainTab(btn){
+  const id=btn.dataset.tab;
+  document.querySelectorAll('.maintab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById(id).classList.add('on');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function toggleForm(el){
+  const wasOpen=el.classList.contains('open');
+  el.parentElement.querySelectorAll('.form-item').forEach(f=>f.classList.remove('open'));
+  if(!wasOpen)el.classList.add('open');
+}
+function toggleStage(el){
+  const id=el.dataset.stage;
+  const panel=document.querySelector(`[data-panel="${id}"]`);
+  const wasOn=el.classList.contains('on');
+  document.querySelectorAll('.pipe-step').forEach(s=>s.classList.remove('on'));
+  document.querySelectorAll('.stage-panel').forEach(p=>p.classList.remove('on'));
+  if(!wasOn){el.classList.add('on');panel.classList.add('on');panel.scrollIntoView({behavior:'smooth',block:'nearest'})}
+}
+function switchTab(btn,id){
+  const parent=btn.closest('.stage-body');
+  parent.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  parent.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById(id).classList.add('on');
+}
+</script>
+</body>
+</html>

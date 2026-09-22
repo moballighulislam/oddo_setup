@@ -1,0 +1,19 @@
+node_modules/
+dist/
+
+# secrets — never commit; .env.example carries the variable names
+.env
+.env.local
+.env.*.local
+
+# SQLite dev database
+*.db
+*.db-journal
+prisma/dev.db*
+
+*.log
+npm-debug.log*
+coverage/
+.DS_Store
+.vscode/
+.idea/

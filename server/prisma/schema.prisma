@@ -1,0 +1,353 @@
+// dn-backend — GRC SaaS marketing-site database
+//
+// PORTABILITY NOTE
+// Provider is SQLite for now and moves to MySQL later. To keep that switch cheap,
+// this schema deliberately avoids anything SQLite cannot express:
+//   - no native `enum` blocks   -> enums are String columns, values enforced by Zod
+//                                  (see src/schemas/enums.ts — single source of truth)
+//   - no `Json` scalar          -> JSON is stored as String, written with JSON.stringify
+//   - no `@db.*` native types   -> added during the MySQL migration, not before
+//   - no `Decimal`              -> reCAPTCHA score is a Float
+// Switching to MySQL = change `provider`, add @db hints, regenerate migrations.
+// The models, relations and indexes below carry over unchanged.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// leads — one row per person. The dedup key is `email`.
+// A visitor who subscribes via the footer and books a demo two weeks later is
+// ONE lead row with TWO form_submissions rows.
+// ---------------------------------------------------------------------------
+model Lead {
+  id       Int    @id @default(autoincrement())
+  publicId String @unique @map("public_id") // ULID, safe to expose externally
+
+  // identity — the dedup key
+  email String @unique
+
+  // profile. Every field nullable: the footer form supplies only an email, and
+  // later submissions fill the gaps in (progressive profiling, Layer 2).
+  firstName   String? @map("first_name")
+  lastName    String? @map("last_name")
+  phoneE164   String? @map("phone_e164") // normalised in the enrich job
+  companyName String? @map("company_name")
+  jobTitle    String? @map("job_title")
+  companySize String? @map("company_size") // CompanySize: '1-50' | '51-200' | '201-1000' | '1000+'
+
+  // GRC-specific: which framework they showed up for. Drives nurture branching.
+  frameworkInterest String? @map("framework_interest") // CSV of Framework values
+
+  // firmographic enrichment (filled by the enrich job, not by the form)
+  companyDomain   String? @map("company_domain")
+  companyIndustry String? @map("company_industry")
+  countryCode     String? @map("country_code")
+  region          String?
+
+  // scoring rollup. Denormalised SUM of LeadScore.points so no read aggregates.
+  leadScore  Int    @default(0) @map("lead_score")
+  leadStatus String @default("new") @map("lead_status") // LeadStatus: new | working | nurture | qualified | disqualified
+
+  // routing outcome (set by the route job)
+  assignedTo    String?   @map("assigned_to") // sales rep email
+  routingTier   String?   @map("routing_tier") // RoutingTier: enterprise_ae | sdr | nurture | marketing_drip | bypass_*
+  slaDueAt      DateTime? @map("sla_due_at")
+  firstContacted DateTime? @map("first_contacted_at") // set on first human touch; suppresses the drip
+
+  // consent — GDPR. Absent from the HTML spec, required regardless.
+  consentGiven       Boolean   @default(false) @map("consent_given")
+  consentIp          String?   @map("consent_ip")
+  consentTextVersion String?   @map("consent_text_version")
+  consentAt          DateTime? @map("consent_at")
+
+  // attribution. first_touch is write-once, last_touch updates every submission.
+  firstTouchSource String? @map("first_touch_source")
+  lastTouchSource  String? @map("last_touch_source")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  submissions FormSubmission[]
+  scores      LeadScore[]
+  events      AutomationEvent[]
+  subscriber  NewsletterSubscriber?
+
+  @@index([leadScore])
+  @@index([leadStatus])
+  @@index([assignedTo])
+  @@index([createdAt])
+  @@map("leads")
+}
+
+// ---------------------------------------------------------------------------
+// form_submissions — one row per submit event. Many per lead.
+// ---------------------------------------------------------------------------
+model FormSubmission {
+  id       Int    @id @default(autoincrement())
+  publicId String @unique @map("public_id")
+
+  leadId Int  @map("lead_id")
+  lead   Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  // Idempotency. Client generates it; a double-click or network retry replays
+  // the original response instead of creating a second lead.
+  submissionUuid String @unique @map("submission_uuid")
+
+  // WHICH TEMPLATE was used — drives automation logic and scoring.
+  formId String @map("form_id") // FormId: quick_capture | footer_form | demo_form | contact_form
+
+  // WHERE it was placed — drives reporting only. e.g. homepage_popup, solutions_banner.
+  formName String @map("form_name")
+
+  // contact_form only: routes to support / partnership / media, bypassing scoring
+  inquiryType String? @map("inquiry_type")
+
+  // free text from demo_form / contact_form. Parsed by the ai-extract job.
+  messageText String? @map("message_text")
+
+  // Full POST body as received, JSON-stringified. The forensic record: if a
+  // field is added to a form before the schema catches up, it is still here.
+  rawPayload String @map("raw_payload")
+
+  // anti-bot verdict. Suspicious submissions are STORED and flagged, never dropped.
+  recaptchaScore  Float?  @map("recaptcha_score")
+  isSuspectedBot  Boolean @default(false) @map("is_suspected_bot")
+  botReason       String? @map("bot_reason") // honeypot | too_fast | low_score | rate_limited
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tracking TrackingData?
+
+  @@index([leadId])
+  @@index([formId])
+  @@index([formName])
+  @@index([createdAt])
+  @@index([isSuspectedBot])
+  @@map("form_submissions")
+}
+
+// ---------------------------------------------------------------------------
+// tracking_data — the ~25 auto-captured hidden fields. One row per submission.
+// Split from form_submissions so the hot lead/submission tables stay narrow.
+// ---------------------------------------------------------------------------
+model TrackingData {
+  id Int @id @default(autoincrement())
+
+  submissionId Int            @unique @map("submission_id")
+  submission   FormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  // UTM — read from the URL on landing, persisted in a 90-day first-party cookie
+  utmSource   String? @map("utm_source")
+  utmMedium   String? @map("utm_medium")
+  utmCampaign String? @map("utm_campaign")
+  utmTerm     String? @map("utm_term")
+  utmContent  String? @map("utm_content")
+
+  // multi-touch attribution
+  firstTouchSrc String? @map("first_touch_src") // write-once, 90-day cookie
+  lastTouchSrc  String? @map("last_touch_src") // the converting source
+
+  // page context
+  pageUrl     String? @map("page_url")
+  referrerUrl String? @map("referrer_url")
+  landingPage String? @map("landing_page") // drives content-topic nurture branching
+
+  // session + behaviour — feeds the behavioural dimension of the score
+  sessionId       String? @map("session_id")
+  pagesViewed     Int?    @map("pages_viewed")
+  visitCount      Int?    @map("visit_count")
+  timeOnSiteSec   Int?    @map("time_on_site_sec")
+  visitedPricing  Boolean @default(false) @map("visited_pricing")
+
+  // device + network
+  deviceType String? @map("device_type")
+  userAgent  String? @map("user_agent")
+  ipAddress  String? @map("ip_address")
+
+  // derived by the enrich job from ipAddress
+  geoCountry String? @map("geo_country")
+  geoRegion  String? @map("geo_region")
+  geoCity    String? @map("geo_city")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([utmSource])
+  @@index([sessionId])
+  @@index([landingPage])
+  @@map("tracking_data")
+}
+
+// ---------------------------------------------------------------------------
+// lead_scores — append-only ledger. Never updated, never deleted.
+// Lead.leadScore = SUM(points) across these rows, so every point is explainable.
+// Fastest-growing table in the schema.
+// ---------------------------------------------------------------------------
+model LeadScore {
+  id Int @id @default(autoincrement())
+
+  leadId Int  @map("lead_id")
+  lead   Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  // ScoreCategory: form_intent (max 30) | firmographic (25) | job_title (25) | behavioral (20)
+  category String
+  points   Int
+
+  // human-readable justification, e.g. "Company size: 1000+"
+  reason String
+
+  // which submission triggered it — null for scores from later behaviour
+  submissionId Int? @map("submission_id")
+
+  awardedAt DateTime @default(now()) @map("awarded_at")
+
+  @@index([leadId, category])
+  @@index([awardedAt])
+  @@map("lead_scores")
+}
+
+// ---------------------------------------------------------------------------
+// newsletter_subscribers — the suppression list. Separate from sales leads:
+// a footer subscriber is not a sales lead, and unsubscribing from the newsletter
+// must not delete the lead record.
+// ---------------------------------------------------------------------------
+model NewsletterSubscriber {
+  id Int @id @default(autoincrement())
+
+  email String @unique
+
+  leadId Int?  @unique @map("lead_id")
+  lead   Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  fullName String? @map("full_name")
+
+  // SubscriberStatus: subscribed | unsubscribed | bounced | complained
+  status String @default("subscribed")
+
+  // Legally required on every marketing email. Generated at subscribe time.
+  unsubscribeToken String @unique @map("unsubscribe_token")
+
+  // id returned by the ESP (SendGrid/Postmark/CRM), for two-way sync
+  emailProviderId String? @map("email_provider_id")
+
+  consentGiven Boolean @default(false) @map("consent_given")
+  consentIp    String? @map("consent_ip")
+
+  sourcePage     String? @map("source_page")
+  sourceReferrer String? @map("source_referrer")
+
+  subscribedAt   DateTime  @default(now()) @map("subscribed_at")
+  unsubscribedAt DateTime? @map("unsubscribed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("newsletter_subscribers")
+}
+
+// ---------------------------------------------------------------------------
+// automation_events — audit trail of every automation that fired for a lead.
+// Answers "why did this person get two emails" and "did the CRM push succeed".
+// ---------------------------------------------------------------------------
+model AutomationEvent {
+  id Int @id @default(autoincrement())
+
+  leadId Int  @map("lead_id")
+  lead   Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  // Which submission triggered this. Null for events driven by later behaviour
+  // rather than by a form submit.
+  //
+  // Idempotency is scoped on (lead, eventType, submission) — NOT on (lead,
+  // eventType). A lead who subscribes in March and books a demo in May must get a
+  // confirmation for the demo; deduping per lead would silently swallow it.
+  submissionId Int? @map("submission_id")
+
+  // EventType: confirmation_email | slack_alert | calendar_send | crm_push
+  //          | ai_extract | score_computed | routed | fallback_task | sequence_enrolled
+  eventType String @map("event_type")
+
+  // EventStatus: pending | success | failed | skipped
+  status String @default("pending")
+
+  jobId     String? @map("job_id") // queue job id, for tracing retries
+  attempts  Int     @default(0)
+  payload   String? // JSON-stringified
+  errorText String? @map("error_text")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+
+  @@index([leadId, eventType])
+  @@index([submissionId, eventType])
+  @@index([status])
+  @@index([createdAt])
+  @@map("automation_events")
+}
+
+// ---------------------------------------------------------------------------
+// jobs — database-backed work queue.
+//
+// Deliberately not Redis/BullMQ. At marketing-form volume the throughput ceiling
+// of a polled table is irrelevant, and this removes an entire piece of
+// infrastructure from the deployment. The trade is latency (one poll interval)
+// and no fan-out across many workers.
+//
+// The important property is not speed: a job enqueued inside the submit
+// transaction cannot be lost if the process dies a millisecond later, because it
+// commits atomically with the lead itself. A Redis enqueue after commit can.
+//
+// Swapping to BullMQ later means reimplementing src/queue/driver.ts. Nothing that
+// calls enqueue() has to change.
+// ---------------------------------------------------------------------------
+model Job {
+  id Int @id @default(autoincrement())
+
+  // ULID, used in logs and in automation_events so a job can be traced end to end
+  jobId String @unique @map("job_id")
+
+  // JobType — see src/queue/types.ts
+  type String
+
+  // JSON-stringified arguments
+  payload String
+
+  // JobStatus: pending | running | succeeded | failed | dead
+  // 'failed' is retryable and will be picked up again; 'dead' has exhausted its
+  // attempts and needs a human.
+  status String @default("pending")
+
+  attempts    Int @default(0)
+  maxAttempts Int @default(5) @map("max_attempts")
+
+  // Earliest time this job may run. Drives both scheduling and retry backoff.
+  runAt DateTime @default(now()) @map("run_at")
+
+  // Lease. A worker that crashes mid-job leaves lockedAt set; a stale lock is
+  // reclaimed after the lease expires so the job is never stranded.
+  lockedAt DateTime? @map("locked_at")
+  lockedBy String?   @map("locked_by")
+
+  lastError String? @map("last_error")
+
+  // Chained jobs: enqueued only when this one succeeds.
+  // Kept as a simple self-reference rather than a full DAG — the pipeline is
+  // linear (enrich -> score -> route) and a DAG would be unused complexity.
+  parentJobId String? @map("parent_job_id")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  completedAt DateTime? @map("completed_at")
+
+  // The claim query filters on exactly this pair, in this order.
+  @@index([status, runAt])
+  @@index([type])
+  @@index([lockedAt])
+  @@map("jobs")
+}

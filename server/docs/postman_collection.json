@@ -1,0 +1,751 @@
+{
+  "info": {
+    "name": "dn-backend — GRC webforms",
+    "description": "Form intake API for the GRC SaaS marketing site.\n\nIMPORT AND RUN — no setup needed beyond starting the server (`npm run dev`).\n\nEvery submission uses Postman's `{{$guid}}` variable for `submission_uuid`, so each send generates a fresh idempotency key automatically. The 'Idempotency' folder is the exception — it deliberately reuses one to prove a replay creates no second lead.\n\nRate limit is 5 per IP per hour. To run the whole collection, start the server with RATE_LIMIT_MAX=500.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000",
+      "type": "string"
+    },
+    {
+      "key": "replayUuid",
+      "value": "",
+      "type": "string",
+      "description": "Set by the Idempotency > First submission request, reused by the replay."
+    },
+    {
+      "key": "unsubscribeToken",
+      "value": "PASTE_TOKEN_HERE",
+      "type": "string",
+      "description": "From newsletter_subscribers.unsubscribe_token — find it with `npx prisma studio`."
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Pings the database and reports queue depth. Returns 503 when the database is unreachable.\n\nA rising `pending` count means the worker is behind. Any `dead` count needs a human."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('service is up', () => pm.response.to.have.status(200));",
+                  "pm.test('database reachable', () => {",
+                  "  pm.expect(pm.response.json().checks.database).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "live"
+              ]
+            },
+            "description": "Liveness only, no dependency checks. For container restart policies."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Forms",
+      "item": [
+        {
+          "name": "01 Quick capture (homepage popup)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"form_name\": \"homepage_popup\",\n\n  \"full_name\": \"Jane Okonkwo\",\n  \"email\": \"jane.okonkwo@stellar-payments.com\",\n  \"phone\": \"+1 212 456 7890\",\n  \"company_name\": \"Stellar Payments\",\n\n  \"consent_given\": true,\n  \"consent_text_version\": \"v1\",\n\n  \"utm_source\": \"google\",\n  \"utm_medium\": \"cpc\",\n  \"utm_campaign\": \"grc_q4\",\n  \"page_url\": \"/platform\",\n  \"referrer_url\": \"https://www.google.com/\",\n  \"landing_page\": \"/platform\",\n  \"session_id\": \"sess_a8f3c9d2\",\n  \"pages_viewed\": 4,\n  \"visit_count\": 2,\n  \"visited_pricing\": true,\n  \"device_type\": \"desktop\",\n\n  \"form_render_ms\": 32000,\n  \"website\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/quick_capture/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "quick_capture",
+                "submit"
+              ]
+            },
+            "description": "The 4-field template, used for the homepage popup and the solutions banner.\n\nPhone is OPTIONAL here — a deliberate deviation from the spec. GRC buyers withhold a phone number on a first popup, and qualification happens on the sales call anyway.\n\n`website` is the honeypot: leave it empty."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.response.to.have.status(200));",
+                  "pm.test('returns an id', () => {",
+                  "  pm.expect(pm.response.json().submission_id).to.be.a('string');",
+                  "});",
+                  "pm.test('does not leak sales intelligence', () => {",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b).to.not.have.property('score');",
+                  "  pm.expect(b).to.not.have.property('routing_tier');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 Footer form (newsletter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"form_name\": \"site_footer\",\n\n  \"email\": \"practitioner@gmail.com\",\n  \"full_name\": \"Sam Rivera\",\n\n  \"consent_given\": true,\n  \"consent_text_version\": \"v1\",\n\n  \"utm_source\": \"linkedin\",\n  \"utm_medium\": \"social\",\n  \"page_url\": \"/blog/iso-27001-vs-soc2\",\n  \"referrer_url\": \"https://www.linkedin.com/\",\n  \"landing_page\": \"/blog/iso-27001-vs-soc2\",\n  \"pages_viewed\": 1,\n  \"device_type\": \"mobile\",\n\n  \"form_render_ms\": 12000,\n  \"website\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/footer_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "footer_form",
+                "submit"
+              ]
+            },
+            "description": "Site-wide passive capture. Lowest-commitment entry point.\n\nNote the gmail address: personal email providers are ALLOWED on this form only. An individual practitioner subscribing to a GRC blog is a legitimate audience. Every other template rejects them.\n\nExpected: score 5, tier `marketing_drip`, plus a newsletter_subscribers row."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('personal email allowed on newsletter', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 Book a demo (highest intent)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"form_name\": \"book_a_demo\",\n\n  \"first_name\": \"Elena\",\n  \"last_name\": \"Fischer\",\n  \"email\": \"elena.fischer@meridian-bank.com\",\n  \"phone\": \"+49 30 12345678\",\n  \"company_name\": \"Meridian Bank\",\n  \"job_title\": \"Chief Information Security Officer\",\n  \"company_size\": \"1000+\",\n  \"framework_interest\": [\"soc2\", \"iso27001\"],\n  \"message\": \"We have a SOC 2 Type II audit deadline next month. Need evidence collection automated urgently.\",\n\n  \"consent_given\": true,\n  \"consent_text_version\": \"v1\",\n\n  \"utm_source\": \"google\",\n  \"utm_medium\": \"cpc\",\n  \"utm_campaign\": \"grc_q4\",\n  \"first_touch_src\": \"linkedin\",\n  \"page_url\": \"/demo\",\n  \"referrer_url\": \"https://www.google.com/\",\n  \"landing_page\": \"/frameworks/soc2-checklist\",\n  \"session_id\": \"sess_7fe21b\",\n  \"pages_viewed\": 8,\n  \"visit_count\": 3,\n  \"time_on_site_sec\": 840,\n  \"visited_pricing\": true,\n  \"device_type\": \"desktop\",\n\n  \"form_render_ms\": 45000,\n  \"website\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/demo_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "demo_form",
+                "submit"
+              ]
+            },
+            "description": "Full lead qualification. This payload scores the maximum 100:\n  form_intent 30 (demo) + firmographic 25 (1000+) + job_title 25 (CISO) + behavioral 20\n\nExpected: tier `enterprise_ae`, SLA 1 hour out, and jobs queued for slack_alert, calendar_send and ai_extract.\n\nThe message text is parsed for frameworks and urgency — check automation_events afterwards.\n\ncompany_size:        1-50 | 51-200 | 201-1000 | 1000+\nframework_interest:  soc2 | iso27001 | hipaa | gdpr | pci_dss | nist | fedramp | iso42001 | eu_ai_act | other"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.response.to.have.status(200));",
+                  "pm.test('returns an id', () => {",
+                  "  pm.expect(pm.response.json().submission_id).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 Contact us (sales inquiry)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"form_name\": \"contact_us\",\n\n  \"first_name\": \"Marcus\",\n  \"last_name\": \"Webb\",\n  \"email\": \"marcus.webb@apex-insurance.com\",\n  \"phone\": \"+1 415 236 7890\",\n  \"company_name\": \"Apex Insurance\",\n  \"job_title\": \"VP of Risk and Compliance\",\n  \"inquiry_type\": \"request_demo\",\n  \"message\": \"Interested in seeing how you handle ISO 27001 evidence collection.\",\n\n  \"consent_given\": true,\n  \"page_url\": \"/contact\",\n  \"pages_viewed\": 3,\n  \"device_type\": \"desktop\",\n  \"form_render_ms\": 60000,\n  \"website\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/contact_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "contact_form",
+                "submit"
+              ]
+            },
+            "description": "General inquiry with routing. `inquiry_type` decides which team receives it.\n\n`request_demo` and `general` ARE real sales leads and go through normal scoring. Only support, partnership and media bypass it.\n\ninquiry_type: request_demo | general | partnership | support | media"
+          }
+        },
+        {
+          "name": "05 Contact us (support — bypasses scoring)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"form_name\": \"contact_us\",\n\n  \"first_name\": \"Tara\",\n  \"last_name\": \"Whitfield\",\n  \"email\": \"t.whitfield@orion-logistics.com\",\n  \"phone\": \"+1 212 555 0147\",\n  \"company_name\": \"Orion Logistics\",\n  \"job_title\": \"IT Director\",\n  \"inquiry_type\": \"support\",\n  \"message\": \"Existing customer. SSO login failing for three users since yesterday.\",\n\n  \"form_render_ms\": 55000,\n  \"website\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/contact_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "contact_form",
+                "submit"
+              ]
+            },
+            "description": "A support ticket is not a sales lead. It skips scoring entirely and routes to the support queue.\n\nExpected: tier `bypass_support`, lead_status `disqualified` (excluded from pipeline reporting), and NO Slack alert.\n\nScoring a support ticket and handing it to an AE wastes both teams' time."
+          }
+        },
+        {
+          "name": "06 Demo via CDN edge (geo + phone normalisation)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              },
+              {
+                "key": "cf-connecting-ip",
+                "value": "88.99.100.50"
+              },
+              {
+                "key": "cf-ipcountry",
+                "value": "DE"
+              },
+              {
+                "key": "user-agent",
+                "value": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"form_name\": \"book_a_demo\",\n\n  \"first_name\": \"Lukas\",\n  \"last_name\": \"Brandt\",\n  \"email\": \"lukas@berlin-fintech.de\",\n  \"phone\": \"030 12345678\",\n  \"company_name\": \"Berlin Fintech\",\n  \"job_title\": \"CISO\",\n  \"company_size\": \"1000+\",\n\n  \"consent_given\": true,\n  \"form_render_ms\": 41000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/demo_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "demo_form",
+                "submit"
+              ]
+            },
+            "description": "Simulates what Cloudflare sends in production.\n\nThe phone here is a bare German national number with no country code. Without `cf-ipcountry`, the service leaves it exactly as typed — it refuses to guess a country, because guessing wrong CORRUPTS the number rather than merely leaving it unformatted.\n\nWith the header present, expect after the worker runs:\n  country_code = DE\n  device_type  = mobile   (parsed from the user agent; the client sent none)\n  phone_e164   = +493012345678"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Idempotency",
+      "item": [
+        {
+          "name": "07a First submission (saves the uuid)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Generate one uuid and keep it, so the replay request can reuse it.",
+                  "pm.collectionVariables.set('replayUuid', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted', () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('firstSubmissionId', pm.response.json().submission_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{replayUuid}}\",\n  \"form_name\": \"site_footer\",\n  \"email\": \"duplicate.test@acme-corp.com\",\n  \"consent_given\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/footer_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "footer_form",
+                "submit"
+              ]
+            },
+            "description": "Run this FIRST. It stores the generated uuid in a collection variable so the next request can replay it."
+          }
+        },
+        {
+          "name": "07b Replay same uuid (must not create a second lead)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('replay accepted', () => pm.response.to.have.status(200));",
+                  "pm.test('returns the ORIGINAL submission id', () => {",
+                  "  pm.expect(pm.response.json().submission_id)",
+                  "    .to.eql(pm.collectionVariables.get('firstSubmissionId'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{replayUuid}}\",\n  \"form_name\": \"site_footer\",\n  \"email\": \"duplicate.test@acme-corp.com\",\n  \"consent_given\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/footer_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "footer_form",
+                "submit"
+              ]
+            },
+            "description": "Run AFTER 07a. Same submission_uuid, so this is a double-click or a network retry.\n\nReturns the original submission_id and creates no second lead."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Errors",
+      "item": [
+        {
+          "name": "08 Missing required fields (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"email\": \"incomplete@acme-corp.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/demo_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "demo_form",
+                "submit"
+              ]
+            },
+            "description": "Returns field-level errors under `fields`, ready to render next to each input."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('names the missing fields', () => {",
+                  "  pm.expect(pm.response.json().fields).to.have.property('first_name');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09 Personal email on a lead form (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\",\n  \"email\": \"someone@gmail.com\",\n  \"phone\": \"+12124567890\",\n  \"company_name\": \"Test Co\",\n  \"job_title\": \"CISO\",\n  \"company_size\": \"1000+\",\n  \"form_render_ms\": 40000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/demo_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "demo_form",
+                "submit"
+              ]
+            },
+            "description": "A GRC platform sells to organisations, and a gmail address carries no company to enrich or score.\n\nCompare with request 02, where the same address is accepted on the newsletter form."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('rejected', () => pm.response.to.have.status(400));",
+                  "pm.test('explains why', () => {",
+                  "  pm.expect(pm.response.json().error).to.eql('personal_email');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 Unknown form template (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/not_a_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "not_a_form",
+                "submit"
+              ]
+            },
+            "description": "Valid form ids: quick_capture, footer_form, demo_form, contact_form"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('not found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Anti-bot",
+      "description": "All of these return 200 with a normal submission_id. That is deliberate — telling a bot it was detected only helps it. Check the database: is_suspected_bot = 1, and NO automation jobs were queued.",
+      "item": [
+        {
+          "name": "11 Honeypot filled",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"full_name\": \"Bot Bot\",\n  \"email\": \"bot@spam-farm.biz\",\n  \"company_name\": \"SpamFarm\",\n  \"website\": \"http://spam.example\",\n  \"form_render_ms\": 30000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/quick_capture/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "quick_capture",
+                "submit"
+              ]
+            },
+            "description": "`website` is a hidden input, styled off-screen. A real browser leaves it empty; naive bots fill every field they find.\n\nStored with bot_reason = 'honeypot'. No confirmation email, no Slack alert, no CRM push."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('bot sees a normal success response', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 Submitted too fast",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"full_name\": \"Fast Bot\",\n  \"email\": \"fast@speedy-domain.com\",\n  \"company_name\": \"Speedy\",\n  \"form_render_ms\": 800\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/quick_capture/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "quick_capture",
+                "submit"
+              ]
+            },
+            "description": "800ms between form render and submit is faster than a human can type four fields.\n\nThreshold is MIN_SUBMIT_SECONDS, default 3. Stored with bot_reason = 'too_fast'."
+          }
+        },
+        {
+          "name": "13 Server-owned field injection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"submission_uuid\": \"{{$guid}}\",\n  \"email\": \"attacker@evil-corp.com\",\n  \"lead_score\": 100,\n  \"assigned_to\": \"ceo@company.com\",\n  \"routing_tier\": \"enterprise_ae\",\n  \"lead_status\": \"qualified\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/forms/footer_form/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "forms",
+                "footer_form",
+                "submit"
+              ]
+            },
+            "description": "An attempt to hand yourself a score of 100 and an enterprise AE.\n\nServer-owned fields are stripped BEFORE validation, so they never reach the database — not even inside raw_payload as authoritative values.\n\nReturns 200, but the lead lands at score 5 / marketing_drip / marketing@queue. Verify in Prisma Studio."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('accepted but neutralised', () => pm.response.to.have.status(200));",
+                  "// Verify the stored row in Prisma Studio: lead_score must be 5, not 100."
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Newsletter",
+      "description": "Set the `unsubscribeToken` collection variable first. Find a token with `npx prisma studio` → newsletter_subscribers → unsubscribe_token.",
+      "item": [
+        {
+          "name": "14 Unsubscribe (one-click, redirects)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/newsletter/unsubscribe?token={{unsubscribeToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "newsletter",
+                "unsubscribe"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{unsubscribeToken}}"
+                }
+              ]
+            },
+            "description": "The target for the link in an email footer. GET so it works from a mail client without JavaScript.\n\nAn unknown or already-used token STILL reports success. Telling someone 'that link is invalid' when they are trying to leave is hostile and a compliance risk.\n\nNOTE: this returns a 302 redirect to PUBLIC_APP_URL (http://localhost:3000/unsubscribe?status=done). Postman follows redirects by default, so if your frontend is not running you will see a connection error — the unsubscribe itself still succeeded. Turn off 'Automatically follow redirects' in Postman settings to see the raw 302."
+          }
+        },
+        {
+          "name": "15 Unsubscribe (JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{unsubscribeToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/newsletter/unsubscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "newsletter",
+                "unsubscribe"
+              ]
+            },
+            "description": "For an in-page preference centre.\n\nSets status on the subscriber record. It never deletes the lead — someone can opt out of marketing email and remain an active sales opportunity."
+          }
+        },
+        {
+          "name": "16 Resubscribe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "content-type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{unsubscribeToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/newsletter/resubscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "newsletter",
+                "resubscribe"
+              ]
+            },
+            "description": "Requires the same token — the only person who can undo an unsubscribe is whoever holds the link from their own inbox.\n\nBounced and complained addresses are NOT resubscribed by a link click. Re-mailing a complained address damages sending reputation for everyone."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "dn-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GRC SaaS marketing-site backend: form intake, lead scoring, routing and marketing automation",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/src/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/helmet": "^12.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@prisma/client": "^6.2.1",
+    "fastify": "^5.2.1",
+    "libphonenumber-js": "^1.11.17",
+    "pino": "^9.6.0",
+    "ulid": "^2.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.6",
+    "eslint": "^9.18.0",
+    "pino-pretty": "^13.0.0",
+    "prettier": "^3.4.2",
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^2.1.8"
+  }
+}
