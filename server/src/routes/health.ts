@@ -8,6 +8,7 @@
 import type { FastifyInstance } from 'fastify';
 import { pingDatabase } from '../db.js';
 import { queueStats } from '../queue/driver.js';
+import { junkStats } from '../services/junk.js';
 import { env } from '../env.js';
 
 export async function healthRoutes(app: FastifyInstance): Promise<void> {
@@ -17,12 +18,16 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
     // Queue depth lives in the same database, so it is only readable when the
     // database is up.
     const queue = dbOk ? await queueStats() : null;
+    // Surfaced so a spam run is visible, and so junk awaiting review does not sit
+    // unnoticed — that backlog is where a false-positive lead hides.
+    const junk = dbOk ? await junkStats() : null;
 
     return reply.code(dbOk ? 200 : 503).send({
       status: dbOk ? 'ok' : 'degraded',
       checks: {
         database: dbOk ? 'ok' : 'unreachable',
         queue,
+        junk,
       },
       env: env.NODE_ENV,
       uptime: Math.round(process.uptime()),

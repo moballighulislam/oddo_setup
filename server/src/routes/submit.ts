@@ -13,6 +13,7 @@ import { FORM_SCHEMAS, normalise, requiresBusinessEmail } from '../schemas/forms
 import { HiddenFieldsSchema, stripServerOwned } from '../schemas/hidden.js';
 import { checkSubmission, isFreeEmailDomain } from '../services/antibot.js';
 import { persistSubmission } from '../services/persist.js';
+import { quarantine } from '../services/junk.js';
 import { clientIp, clientCountry, deviceFromUserAgent, userAgent } from '../lib/clientIp.js';
 import { env } from '../env.js';
 
@@ -103,7 +104,49 @@ export async function submitRoutes(app: FastifyInstance): Promise<void> {
         remoteIp: ip ?? undefined,
       });
 
-      // ---- 6. Persist (idempotent on submission_uuid) ---------------------
+      // ---- 6. Quarantine, if it failed an anti-bot check -------------------
+      //
+      // Junk goes to its own table and never touches `leads`. Lead counts, exports
+      // and CRM pushes stay clean, and no automation fires.
+      //
+      // The response is identical to a successful submission. Telling a bot it was
+      // detected only helps it tune around the checks.
+      if (verdict.isSuspected) {
+        try {
+          const junk = await quarantine({
+            submissionUuid: parsed.data.submission_uuid,
+            formId,
+            formName: parsed.data.form_name,
+            email: data.email,
+            contactName: [data.firstName, data.lastName].filter(Boolean).join(' ') || null,
+            companyName: data.companyName ?? null,
+            rawPayload: cleaned,
+            botReason: verdict.reason ?? 'unknown',
+            recaptchaScore: verdict.score,
+            ipAddress: ip,
+            userAgent: ua,
+            geoCountry: clientCountry(req),
+            pageUrl: hidden.page_url ?? null,
+            referrerUrl: hidden.referrer_url ?? null,
+          });
+
+          req.log.info(
+            { formId, reason: verdict.reason, junk: junk.publicId },
+            'submission quarantined as junk',
+          );
+
+          return reply.code(200).send({ ok: true, submission_id: junk.publicId });
+        } catch (err) {
+          req.log.error({ err, formId }, 'failed to quarantine submission');
+          return reply.code(500).send({
+            ok: false,
+            error: 'storage_failed',
+            message: 'Something went wrong on our end. Please try again.',
+          });
+        }
+      }
+
+      // ---- 7. Persist (idempotent on submission_uuid) ---------------------
       try {
         const result = await persistSubmission({
           formId,
@@ -116,8 +159,10 @@ export async function submitRoutes(app: FastifyInstance): Promise<void> {
           userAgent: ua,
           geoCountry: clientCountry(req),
           deviceTypeFallback: deviceFromUserAgent(ua),
-          isSuspectedBot: verdict.isSuspected,
-          botReason: verdict.reason,
+          // Anything reaching here passed every anti-bot check — junk was
+          // quarantined above and returned early.
+          isSuspectedBot: false,
+          botReason: null,
           recaptchaScore: verdict.score,
         });
 
@@ -128,7 +173,6 @@ export async function submitRoutes(app: FastifyInstance): Promise<void> {
             submission: result.submissionPublicId,
             score: result.score,
             tier: result.routingTier,
-            bot: verdict.isSuspected ? verdict.reason : undefined,
             duplicate: result.wasDuplicate || undefined,
           },
           'form submission stored',

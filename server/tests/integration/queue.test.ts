@@ -206,7 +206,8 @@ describe('submission dispatch', () => {
     expect(types).toContain('ai_extract');
   });
 
-  it('queues nothing for a suspected bot', async () => {
+  it('queues nothing for a quarantined submission', async () => {
+    // Junk never reaches the lead path, so no automation can fire from it.
     await app.inject({
       method: 'POST',
       url: '/api/forms/quick_capture/submit',

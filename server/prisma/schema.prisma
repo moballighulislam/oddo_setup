@@ -358,3 +358,61 @@ model Job {
   @@index([lockedAt])
   @@map("jobs")
 }
+
+// ---------------------------------------------------------------------------
+// junk_submissions — quarantine for submissions that failed an anti-bot check.
+//
+// Kept out of `leads` entirely so lead counts, exports and CRM pushes are never
+// polluted by spam. Nothing here creates a Lead, a FormSubmission or a job.
+//
+// The full payload is stored, not just a flag, because reCAPTCHA v3 produces false
+// positives on legitimate traffic — corporate VPNs, proxies and privacy browsers all
+// score low. A CISO filling in the form from a company VPN can land here. Without the
+// complete payload there is no way to review that and recover the lead, and the table
+// becomes a black hole where real leads die quietly.
+//
+// `promoteJunkSubmission()` is the way back out.
+// ---------------------------------------------------------------------------
+model JunkSubmission {
+  id       Int    @id @default(autoincrement())
+  publicId String @unique @map("public_id")
+
+  // Same idempotency guarantee as a real submission: a bot retrying with the same
+  // uuid must not create a second row.
+  submissionUuid String @map("submission_uuid")
+
+  formId   String @map("form_id")
+  formName String @map("form_name")
+
+  // Extracted so the review list is readable without parsing JSON every time.
+  email       String?
+  contactName String? @map("contact_name")
+  companyName String? @map("company_name")
+
+  // Everything as received. The forensic record and the basis for promotion.
+  rawPayload String @map("raw_payload")
+
+  // Why it was quarantined: honeypot | too_fast | low_score | rate_limited
+  botReason      String  @map("bot_reason")
+  recaptchaScore Float?  @map("recaptcha_score")
+
+  ipAddress  String? @map("ip_address")
+  userAgent  String? @map("user_agent")
+  geoCountry String? @map("geo_country")
+  pageUrl    String? @map("page_url")
+  referrerUrl String? @map("referrer_url")
+
+  // Set when a human reviewed this and decided it was real.
+  promotedToLeadId Int?      @map("promoted_to_lead_id")
+  promotedAt       DateTime? @map("promoted_at")
+  reviewedAt       DateTime? @map("reviewed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([submissionUuid])
+  @@index([botReason])
+  @@index([createdAt])
+  @@index([email])
+  @@index([promotedToLeadId])
+  @@map("junk_submissions")
+}

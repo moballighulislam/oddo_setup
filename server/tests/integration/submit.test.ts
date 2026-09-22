@@ -194,8 +194,8 @@ describe('POST /api/forms/:formId/submit', () => {
     });
   });
 
-  describe('anti-bot', () => {
-    it('stores and flags a honeypot hit without telling the bot', async () => {
+  describe('anti-bot quarantine', () => {
+    it('quarantines a honeypot hit without telling the bot', async () => {
       const email = `bot.${tag()}@spamco-domain.biz`;
       const res = await post('quick_capture', {
         submission_uuid: randomUUID(),
@@ -206,19 +206,32 @@ describe('POST /api/forms/:formId/submit', () => {
         form_render_ms: 30_000,
       });
 
-      // The bot sees a normal success response.
+      // The bot sees a normal success response — telling it otherwise only helps it.
       expect(res.statusCode).toBe(200);
       expect(res.json().ok).toBe(true);
 
-      const lead = await prisma.lead.findUnique({
-        where: { email },
-        include: { submissions: true },
-      });
-      expect(lead!.submissions[0]!.isSuspectedBot).toBe(true);
-      expect(lead!.submissions[0]!.botReason).toBe('honeypot');
+      const junk = await prisma.junkSubmission.findFirst({ where: { email } });
+      expect(junk).not.toBeNull();
+      expect(junk!.botReason).toBe('honeypot');
     });
 
-    it('flags a submission faster than a human could type', async () => {
+    it('keeps junk out of the leads table entirely', async () => {
+      // The whole point: lead counts, exports and CRM pushes stay clean.
+      const email = `bot.leads.${tag()}@spamco-domain.biz`;
+      await post('quick_capture', {
+        submission_uuid: randomUUID(),
+        full_name: 'Bot',
+        email,
+        company_name: 'SpamCo',
+        website: 'spam',
+        form_render_ms: 30_000,
+      });
+
+      expect(await prisma.lead.findUnique({ where: { email } })).toBeNull();
+      expect(await prisma.formSubmission.count({ where: { lead: { email } } })).toBe(0);
+    });
+
+    it('quarantines a submission faster than a human could type', async () => {
       const email = `fast.${tag()}@speedy-domain.com`;
       await post('quick_capture', {
         submission_uuid: randomUUID(),
@@ -228,23 +241,81 @@ describe('POST /api/forms/:formId/submit', () => {
         form_render_ms: 800,
       });
 
-      const lead = await prisma.lead.findUnique({
-        where: { email },
-        include: { submissions: true },
+      const junk = await prisma.junkSubmission.findFirst({ where: { email } });
+      expect(junk!.botReason).toBe('too_fast');
+    });
+
+    it('stores the full payload so a false positive can be recovered', async () => {
+      // reCAPTCHA scores corporate VPNs low. Without the payload there is no way
+      // back and the table becomes a black hole.
+      const email = `vpn.ciso.${tag()}@enterprise-corp.com`;
+      await post('demo_form', {
+        ...demoPayload({ email }),
+        website: 'triggered',
       });
-      expect(lead!.submissions[0]!.botReason).toBe('too_fast');
+
+      const junk = await prisma.junkSubmission.findFirstOrThrow({ where: { email } });
+      const payload = JSON.parse(junk.rawPayload) as Record<string, unknown>;
+
+      expect(payload.job_title).toBe('Chief Information Security Officer');
+      expect(payload.company_size).toBe('1000+');
+      expect(junk.companyName).toBe('Meridian Bank');
     });
 
-    it('never assigns a flagged submission to a rep', async () => {
-      const email = `botrouting.${tag()}@spamco-domain.biz`;
-      await post('demo_form', demoPayload({ email, website: 'spam', submission_uuid: randomUUID() }));
+    it('promotes a false positive into a fully scored lead', async () => {
+      const email = `promote.${tag()}@enterprise-corp.com`;
+      await post('demo_form', { ...demoPayload({ email }), website: 'triggered' });
 
-      const lead = await prisma.lead.findUnique({ where: { email } });
-      expect(lead!.routingTier).toBe('marketing_drip');
-      expect(lead!.slaDueAt).toBeNull();
+      const junk = await prisma.junkSubmission.findFirstOrThrow({ where: { email } });
+
+      const { promoteJunkSubmission } = await import('../../src/services/junk.js');
+      const result = await promoteJunkSubmission(junk.publicId);
+
+      expect(result.promoted).toBe(true);
+
+      // Replayed through the normal path, so it is scored and routed identically.
+      const lead = await prisma.lead.findUniqueOrThrow({ where: { email } });
+      expect(lead.leadScore).toBeGreaterThanOrEqual(80);
+      expect(lead.routingTier).toBe('enterprise_ae');
+
+      const updated = await prisma.junkSubmission.findUniqueOrThrow({
+        where: { id: junk.id },
+      });
+      expect(updated.promotedToLeadId).toBe(lead.id);
     });
 
-    it('does not subscribe a flagged submission to the newsletter', async () => {
+    it('does not promote the same submission twice', async () => {
+      const email = `promote.once.${tag()}@enterprise-corp.com`;
+      await post('demo_form', { ...demoPayload({ email }), website: 'triggered' });
+
+      const junk = await prisma.junkSubmission.findFirstOrThrow({ where: { email } });
+      const { promoteJunkSubmission } = await import('../../src/services/junk.js');
+
+      const first = await promoteJunkSubmission(junk.publicId);
+      const second = await promoteJunkSubmission(junk.publicId);
+
+      expect(second.leadId).toBe(first.leadId);
+      expect(await prisma.lead.count({ where: { email } })).toBe(1);
+    });
+
+    it('is idempotent — a bot retrying the same uuid makes one row', async () => {
+      const uuid = randomUUID();
+      const payload = {
+        submission_uuid: uuid,
+        full_name: 'Repeat Bot',
+        email: `repeat.bot.${tag()}@spamco-domain.biz`,
+        company_name: 'SpamCo',
+        website: 'spam',
+        form_render_ms: 30_000,
+      };
+
+      await post('quick_capture', payload);
+      await post('quick_capture', payload);
+
+      expect(await prisma.junkSubmission.count({ where: { submissionUuid: uuid } })).toBe(1);
+    });
+
+    it('never subscribes quarantined submissions to the newsletter', async () => {
       const email = `botnews.${tag()}@spamco-domain.biz`;
       await post('footer_form', {
         submission_uuid: randomUUID(),
@@ -253,8 +324,13 @@ describe('POST /api/forms/:formId/submit', () => {
         website: 'spam',
       });
 
-      const sub = await prisma.newsletterSubscriber.findUnique({ where: { email } });
-      expect(sub).toBeNull();
+      expect(await prisma.newsletterSubscriber.findUnique({ where: { email } })).toBeNull();
+    });
+
+    it('reports junk counts by reason', async () => {
+      const { junkStats } = await import('../../src/services/junk.js');
+      const stats = await junkStats();
+      expect(stats).toHaveProperty('awaiting_review');
     });
   });
 

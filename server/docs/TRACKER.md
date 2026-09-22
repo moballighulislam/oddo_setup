@@ -3,7 +3,7 @@
 Single source of truth for what is built, what is not, and what is blocked.
 
 **Last updated:** 2026-09-22
-**Tests:** 136 passing · **Typecheck:** clean
+**Tests:** 141 passing · **Typecheck:** clean
 **Spec:** `docs/specs/GRC_SaaS_Automation_Architecture.html`
 
 Legend: ✅ done and tested · 🟡 partial · ⬜ not started · 🚫 blocked
@@ -96,8 +96,12 @@ Over-long strings are truncated, not rejected.
 - ✅ Submit-speed check (under 3s = bot)
 - ✅ reCAPTCHA v3 with score threshold
 - ✅ Rate limit
-- ✅ **Flag, never drop.** Suspicious submissions are stored and marked; a false
-  positive that discards a real enterprise lead costs far more than a spam row
+- ✅ **Quarantine, never drop.** Failed submissions go to `junk_submissions` with
+  their full payload, never to `leads`. Lead counts, exports and CRM pushes stay clean
+- ✅ **Promotion path** — `promoteJunkSubmission()` replays a false positive through
+  the normal submit path, so it is scored and routed identically. reCAPTCHA scores
+  corporate VPNs low, so this is not hypothetical
+- ✅ 90-day retention; promoted rows are never pruned
 - ✅ Bots receive a normal `200` — telling a bot it was caught only helps it
 - ✅ Bots generate zero automation jobs
 
@@ -113,7 +117,7 @@ Over-long strings are truncated, not rejected.
 | 4. Score | ✅ | Runs inline; moves to the worker when volume justifies it |
 | 5. Route | ✅ | Tiers, SLA deadlines, inquiry-type bypass |
 
-### Schema — ✅ 7 tables
+### Schema — ✅ 8 tables
 
 | Table | Purpose | Status |
 |---|---|---|
@@ -124,6 +128,7 @@ Over-long strings are truncated, not rejected.
 | `newsletter_subscribers` | Suppression list | ✅ |
 | `automation_events` | Audit trail | ✅ |
 | `jobs` | Work queue | ✅ |
+| `junk_submissions` | Quarantine for failed anti-bot checks | ✅ |
 
 Deviations from the spec, with reasons, are in `docs/database-design.md`.
 

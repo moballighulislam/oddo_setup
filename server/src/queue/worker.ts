@@ -6,6 +6,7 @@
  * as its own process via `npm run worker`.
  */
 import { claimJobs, completeJob, failJob, pruneCompletedJobs } from './driver.js';
+import { pruneJunk } from '../services/junk.js';
 import { HANDLERS } from './handlers.js';
 import { logger } from '../lib/logger.js';
 
@@ -135,6 +136,11 @@ export function startJobPruner(intervalMs = 6 * 60 * 60 * 1000): NodeJS.Timeout 
         if (count > 0) logger.info({ count }, 'pruned completed jobs');
       })
       .catch((err) => logger.error({ err }, 'job pruning failed'));
+
+    // Junk is kept for 90 days so false positives can still be found and promoted.
+    // Promoted rows are never pruned — they are the evidence that the anti-bot
+    // thresholds need adjusting.
+    pruneJunk(90).catch((err) => logger.error({ err }, 'junk pruning failed'));
   }, intervalMs);
 
   timer.unref(); // must not keep the process alive
