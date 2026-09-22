@@ -3,7 +3,7 @@
 Single source of truth for what is built, what is not, and what is blocked.
 
 **Last updated:** 2026-09-22
-**Tests:** 112 passing · **Typecheck:** clean
+**Tests:** 136 passing · **Typecheck:** clean
 **Spec:** `docs/specs/GRC_SaaS_Automation_Architecture.html`
 
 Legend: ✅ done and tested · 🟡 partial · ⬜ not started · 🚫 blocked
@@ -24,7 +24,8 @@ Legend: ✅ done and tested · 🟡 partial · ⬜ not started · 🚫 blocked
 | Automation Layer 1 | ✅ |
 | Consent + unsubscribe | ✅ |
 | Automation Layers 2–5 | ⬜ |
-| Live integrations (email/Slack/CRM) | 🚫 credentials |
+| Odoo CRM integration | ✅ built, 🚫 credentials |
+| Live integrations (email/Slack) | 🚫 credentials |
 | Production readiness | ⬜ |
 
 **The one sentence that matters:** every form submission is captured, scored, routed
@@ -185,7 +186,7 @@ they would send and record the event as `skipped` rather than `success`.
 | `enrich` | every submission | ✅ | ✅ |
 | `confirmation_email` | every submission | ✅ | 🚫 no provider |
 | `fallback_task` | every submission | ✅ | ✅ |
-| `crm_push` | every submission | ✅ | 🚫 no CRM |
+| `crm_push` | every sales submission | ✅ Odoo | 🚫 no credentials |
 | `slack_alert` | demo intent only | ✅ | 🚫 no webhook |
 | `calendar_send` | demo intent only | ✅ | 🚫 no booking URL |
 | `ai_extract` | when message text present | ✅ | ✅ |
@@ -308,7 +309,7 @@ Guarded so it cannot ship broken: `env.ts` refuses to boot in production without
 
 | Decision | Blocks | Notes |
 |---|---|---|
-| **CRM vendor** | Layers 2 and 5 | `crm_push` is an interface; intake does not change |
+| ~~CRM vendor~~ | — | ✅ **Decided: Odoo.** Integration built and tested |
 | **Email provider** | Layer 1 going live | SendGrid / Postmark / CRM-native |
 | **SMS consent** | Layer 5 | Add a checkbox or drop the two SMS touches |
 | **Form placement matrix** | nothing | Affects `form_name` values only, no schema change |

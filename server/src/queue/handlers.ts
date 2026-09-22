@@ -19,7 +19,6 @@ import {
   sendEmail,
   sendSlackAlert,
   unsubscribeUrl,
-  type CrmLead,
 } from '../services/providers.js';
 import type { EventType } from '../schemas/enums.js';
 import type { JobType } from './types.js';
@@ -327,10 +326,37 @@ const fallbackTask: JobHandler = async (payload, jobId) => {
 const crmPush: JobHandler = async (payload, jobId) => {
   const { leadId, submissionId } = requireIds(payload);
 
-  const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+  const lead = await prisma.lead.findUnique({
+    where: { id: leadId },
+    include: { scores: { orderBy: { id: 'desc' }, take: 8 } },
+  });
   if (!lead) throw new Error(`lead ${leadId} not found`);
 
-  const crmLead: CrmLead = {
+  const submission = await prisma.formSubmission.findUnique({
+    where: { id: submissionId },
+    include: { tracking: true },
+  });
+  if (!submission) throw new Error(`submission ${submissionId} not found`);
+
+  // A flagged submission never reaches the CRM. Pushing spam wastes API quota and,
+  // worse, pollutes the pipeline someone has to trust.
+  if (submission.isSuspectedBot) {
+    await recordEvent(leadId, submissionId, 'crm_push', 'skipped', jobId, {
+      reason: 'suspected bot',
+    });
+    return;
+  }
+
+  // Non-sales inquiries are not deals. Support tickets and press enquiries in the
+  // pipeline make the forecast meaningless.
+  if (lead.routingTier?.startsWith('bypass_')) {
+    await recordEvent(leadId, submissionId, 'crm_push', 'skipped', jobId, {
+      reason: `not a sales lead (${lead.routingTier})`,
+    });
+    return;
+  }
+
+  const result = await pushToCrm({
     email: lead.email,
     firstName: lead.firstName,
     lastName: lead.lastName,
@@ -338,19 +364,35 @@ const crmPush: JobHandler = async (payload, jobId) => {
     companyName: lead.companyName,
     jobTitle: lead.jobTitle,
     companySize: lead.companySize,
+    countryCode: lead.countryCode,
     leadScore: lead.leadScore,
-    leadStatus: lead.leadStatus,
     routingTier: lead.routingTier,
-    assignedTo: lead.assignedTo,
     frameworkInterest: lead.frameworkInterest,
-    source: lead.lastTouchSource,
-    consentGiven: lead.consentGiven,
-  };
+    // The ledger, so a human sees why it scored what it did rather than a bare number.
+    scoreBreakdown: lead.scores.map((s) => `+${s.points} — ${s.reason}`),
+    formId: submission.formId,
+    formName: submission.formName,
+    message: submission.messageText,
+    landingPage: submission.tracking?.landingPage ?? null,
+    pageUrl: submission.tracking?.pageUrl ?? null,
+    utmSource: submission.tracking?.utmSource ?? null,
+    utmMedium: submission.tracking?.utmMedium ?? null,
+    utmCampaign: submission.tracking?.utmCampaign ?? null,
+    existingOdooId: lead.crmLeadId,
+  });
 
-  const result = await pushToCrm(crmLead);
+  // Store the CRM id immediately. Without it a retry after a timeout creates a second
+  // record and splits the lead's history.
+  if (result.crmId) {
+    await prisma.lead.update({
+      where: { id: leadId },
+      data: { crmLeadId: result.crmId, crmSyncedAt: new Date() },
+    });
+  }
 
   await recordEvent(leadId, submissionId, 'crm_push', result.simulated ? 'skipped' : 'success', jobId, {
     crmId: result.crmId,
+    created: result.created,
     simulated: result.simulated,
   });
 };

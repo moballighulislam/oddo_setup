@@ -70,6 +70,12 @@ model Lead {
   firstTouchSource String? @map("first_touch_source")
   lastTouchSource  String? @map("last_touch_source")
 
+  // CRM sync. crmLeadId is the Odoo crm.lead id — holding it means a retry after a
+  // timeout updates the existing record instead of creating a duplicate, which would
+  // split the lead's history across two records.
+  crmLeadId   Int?      @map("crm_lead_id")
+  crmSyncedAt DateTime? @map("crm_synced_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -80,6 +86,7 @@ model Lead {
 
   @@index([leadScore])
   @@index([leadStatus])
+  @@index([crmLeadId])
   @@index([assignedTo])
   @@index([createdAt])
   @@map("leads")

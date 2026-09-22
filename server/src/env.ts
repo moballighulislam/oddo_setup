@@ -60,6 +60,15 @@ const EnvSchema = z
     CALENDAR_BOOKING_URL: z.string().default(''),
     CRM_PROVIDER: z.string().default(''),
     CRM_API_KEY: z.string().default(''),
+
+    // Odoo CRM. All four are required together — a partial configuration is a
+    // misconfiguration, so the check below treats it as "not configured" rather
+    // than failing at the first API call.
+    ODOO_URL: z.string().default(''),
+    ODOO_DB: z.string().default(''),
+    ODOO_USERNAME: z.string().default(''),
+    ODOO_API_KEY: z.string().default(''),
+    ODOO_SALES_TEAM: z.string().default(''),
   })
   // Production must not run with anti-bot disabled or CORS wide open.
   .superRefine((cfg, ctx) => {
@@ -110,4 +119,15 @@ if (!env.EMAIL_PROVIDER_API_KEY) {
 }
 if (!env.SLACK_WEBHOOK_URL) {
   console.warn('[env] SLACK_WEBHOOK_URL not set — team alerts will be logged, not sent');
+}
+
+const odooVars = [env.ODOO_URL, env.ODOO_DB, env.ODOO_USERNAME, env.ODOO_API_KEY];
+if (odooVars.some(Boolean) && !odooVars.every(Boolean)) {
+  // Partial config is worse than none: it looks configured and fails at runtime.
+  console.warn(
+    '[env] Odoo is partially configured — ODOO_URL, ODOO_DB, ODOO_USERNAME and ' +
+      'ODOO_API_KEY are all required. CRM push will stay in simulated mode.',
+  );
+} else if (!odooVars.every(Boolean)) {
+  console.warn('[env] Odoo not configured — CRM pushes will be logged, not sent');
 }

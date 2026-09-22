@@ -10,6 +10,7 @@
  */
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
+import { isOdooConfigured, pushLead, type OdooLeadInput } from './odoo.js';
 
 // ---------------------------------------------------------------------------
 // Email
@@ -97,46 +98,43 @@ export async function sendSlackAlert(alert: SlackAlert): Promise<{ sent: boolean
 // CRM
 // ---------------------------------------------------------------------------
 
-export interface CrmLead {
-  email: string;
-  firstName: string | null;
-  lastName: string | null;
-  phone: string | null;
-  companyName: string | null;
-  jobTitle: string | null;
-  companySize: string | null;
-  leadScore: number;
-  leadStatus: string;
-  routingTier: string | null;
-  assignedTo: string | null;
-  frameworkInterest: string | null;
-  source: string | null;
-  consentGiven: boolean;
-}
+/** Everything the CRM push needs. Assembled by the crm_push handler. */
+export type CrmLead = OdooLeadInput;
 
 export interface CrmResult {
   pushed: boolean;
-  crmId: string | null;
+  crmId: number | null;
+  created: boolean;
   simulated: boolean;
 }
 
 /**
  * Push a lead to the CRM.
  *
- * Vendor is undecided, so this is the seam. Whatever is chosen — HubSpot,
- * ActiveCampaign, Zoho — only this function changes, because nothing upstream knows
- * anything about a CRM beyond "push this lead".
+ * Odoo is the implementation; the seam is kept so swapping vendors touches only this
+ * function. Nothing upstream knows anything about a CRM beyond "push this lead".
+ *
+ * Throws on failure rather than swallowing it — `crm_push` carries the highest retry
+ * budget in the system (8 attempts) because a lead that never reaches the CRM is
+ * invisible to sales, which is the worst outcome this system can produce.
  */
 export async function pushToCrm(lead: CrmLead): Promise<CrmResult> {
-  if (!env.CRM_PROVIDER || !env.CRM_API_KEY) {
+  if (!isOdooConfigured()) {
     logger.info(
       { email: lead.email, score: lead.leadScore, tier: lead.routingTier },
-      '[simulated crm] would push — CRM_PROVIDER/CRM_API_KEY not configured',
+      '[simulated crm] would push to Odoo — credentials not configured',
     );
-    return { pushed: false, crmId: null, simulated: true };
+    return { pushed: false, crmId: null, created: false, simulated: true };
   }
 
-  throw new Error(`CRM provider "${env.CRM_PROVIDER}" has no implementation yet`);
+  const result = await pushLead(lead);
+
+  return {
+    pushed: true,
+    crmId: result.odooId,
+    created: result.created,
+    simulated: false,
+  };
 }
 
 // ---------------------------------------------------------------------------
