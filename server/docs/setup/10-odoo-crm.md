@@ -53,7 +53,14 @@ leaked.
 1. **Settings → Users & Companies → Users → New**
 2. Name: `Backend Integration`
 3. Email: `integration@deepnotch.ai`
-4. Access Rights → **Sales / CRM: User** — not Administrator
+4. Access Rights → **Sales** → **User: All Documents**
+
+   Not "Own Documents Only": the integration searches existing leads by email to
+   deduplicate. Once a lead is assigned to a human, an own-documents-only user can no
+   longer see it — and would create a duplicate instead of updating.
+
+   Not Administrator either: that grants settings, user and app-install access. "All
+   Documents" limits a leaked key to CRM data.
 5. Save
 
 > On the free plan a portal/internal user still counts against nothing — One App Free
@@ -63,16 +70,44 @@ leaked.
 
 ## Step 3 — Generate an API key (5 min)
 
-Log in **as the integration user** (or use "Log in as" from the admin user list).
+No invitation email is needed. As admin, open the user → **Actions** → **Change
+Password** and set one directly. `integration@deepnotch.ai` does not need a real
+mailbox — Odoo treats the email purely as a username.
 
-1. Click the avatar → **My Profile** (or **Preferences**)
-2. **Account Security** tab
-3. **New API Key**
-4. Description: `dn-backend`
-5. Copy it
+Then log in as that user. Use a **private/incognito window** so your admin session
+stays open.
 
-> Odoo shows the key **once**. It is equivalent to a password — if you lose it, you
-> generate a new one rather than recovering it.
+1. Avatar (top right) → **My Profile**
+2. **Account Security** tab → **New API Key**
+3. Re-enter the password when prompted
+4. Name: `dn-backend`
+
+### Scope — Odoo 19 asks
+
+| Scope | Use |
+|---|---|
+| **RPC** ✅ | The external API (`execute_kw`). This is what the backend uses |
+| MCP | Model Context Protocol, for AI agents. Not used here |
+
+A key scoped to MCP only will fail authentication with "Access Denied".
+
+### Expiry — Odoo 19 requires one
+
+Options are 1 day, 1 week, 1 month, 3 months, or a custom date. There is no "never".
+
+**Choose 3 months.** A far-future date is tempting for uptime but it is the wrong
+trade: a long-lived credential means a long exposure window if the key ever leaks into
+a log, a commit or a chat message. Odoo made expiry mandatory deliberately.
+
+Short expiry is only safe because expiry is now *visible* — `/health` reports CRM
+connectivity, so an expired key shows up immediately instead of silently draining
+`crm_push` jobs into the dead queue.
+
+Set a calendar reminder a week before. Rotation takes two minutes: new key, update the
+environment variable, redeploy.
+
+> Odoo shows the key **once**. If you lose it, generate a new one — it cannot be
+> recovered.
 
 ---
 
