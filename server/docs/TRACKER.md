@@ -1,334 +1,366 @@
 # dn-backend — build tracker
 
-Single source of truth for what is built, what is not, and what is blocked.
+**Handoff document.** If you are picking this repo up cold, read this first. It records
+what is finished, what is half-finished and exactly what is missing, which decisions
+are already settled and why, and the traps that will otherwise cost you an hour.
 
-**Last updated:** 2026-09-22
+**Last updated:** 2026-09-23
 **Tests:** 144 passing · **Typecheck:** clean
 **Spec:** `docs/specs/GRC_SaaS_Automation_Architecture.html`
+**Repo:** https://github.com/moballighulislam/oddo_setup — **public, never commit secrets**
 
-Legend: ✅ done and tested · 🟡 partial · ⬜ not started · 🚫 blocked
+Legend: ✅ done · 🟡 partial, details given · ⬜ not started · 🚫 blocked
 
 ---
 
-## Summary
+## 30-second summary
+
+Backend for a GRC SaaS marketing site. Captures form submissions, scores and routes
+them into sales tiers, quarantines spam, and runs marketing automation asynchronously.
+
+**Working end to end:** form intake → validation → anti-bot → scoring → routing → job
+queue → Odoo CRM. Verified against a live Odoo instance.
+
+**The one thing still missing that matters:** no email provider. A lead arrives, saves
+to the database, reaches Odoo — and **nobody is emailed**. The submitter gets no
+confirmation, the team gets no Slack alert. All of it is built; it needs an API key.
+
+---
+
+## Status at a glance
 
 | Area | Status |
 |---|---|
-| Form intake (all 4 templates) | ✅ |
-| Hidden field capture | ✅ |
-| Validation + anti-bot | ✅ |
-| Database schema (7 tables) | ✅ |
-| Lead scoring | ✅ |
-| Sales routing | ✅ |
+| Form intake, 4 templates | ✅ |
+| Hidden field capture (30 fields) | ✅ |
+| Anti-bot + junk quarantine | ✅ |
+| Database schema (9 tables) | ✅ SQLite |
+| Lead scoring + sales routing | ✅ |
 | Job queue | ✅ |
-| Automation Layer 1 | ✅ |
-| Consent + unsubscribe | ✅ |
+| Odoo CRM integration | ✅ live |
+| IP geolocation | ✅ |
+| Automation Layer 1 | 🟡 built, email/Slack not live |
+| Email sending | 🚫 no provider |
 | Automation Layers 2–5 | ⬜ |
-| Odoo CRM integration | ✅ built, 🚫 credentials |
-| Live integrations (email/Slack) | 🚫 credentials |
-| Production readiness | ⬜ |
+| MySQL migration | ⬜ |
+| Deployment | ⬜ |
+| Admin / read API | ⬜ |
 
-**The one sentence that matters:** every form submission is captured, scored, routed
-and queued correctly — but with no email or CRM credentials configured, **no human is
-notified when a lead arrives.** That is the next thing worth doing.
+---
+
+## Settled decisions — do not re-litigate
+
+These were argued through and decided. Changing one needs a reason, not a preference.
+
+| Decision | Why |
+|---|---|
+| **Integer PKs, not UUID** | The spec says UUID. Random UUID PKs fragment the InnoDB clustered index and bloat every secondary index. Each table has a sequential PK plus a `public_id` ULID for external exposure |
+| **Database-backed job queue, not Redis** | Jobs are enqueued *inside* the write transaction, so work cannot be lost if the process dies after responding. A Redis enqueue after commit can be. Also removes a whole piece of infrastructure |
+| **Junk goes to its own table** | `junk_submissions`, never `leads`. Keeps counts, exports and CRM pushes clean |
+| **Quarantine, never drop** | The full payload is stored and `promoteJunkSubmission()` replays it through the normal submit path. reCAPTCHA scores corporate VPNs low; without a way back, the table silently eats real leads |
+| **Sales tiers → Odoo Opportunity, nurture tiers → Odoo Lead** | Otherwise the pipeline fills with newsletter subscribers and stops being a forecast |
+| **Non-sales inquiries never reach the CRM** | support / partnership / media are not deals |
+| **Layer 1 keys on `form_id` only, never on score** | Those automations must still fire if scoring or routing failed |
+| **Flagged submissions get HTTP 200** | Telling a bot it was detected only helps it tune around the checks |
+| **Consent fields + unsubscribe added beyond the spec** | GDPR. The spec captures neither |
+| **Odoo, One App Free** | CRM only. Installing a second app ends the free tier |
+| **4 pipeline stages, 4 lost reasons** | Sized for a pre-launch startup. An earlier 6-stage design was cut — a pipeline nobody maintains is worse than none |
 
 ---
 
 ## 1. Form intake — ✅ COMPLETE
 
-### Templates
+Four templates: `quick_capture`, `footer_form`, `demo_form`, `contact_form`.
 
-| Form | `form_id` | Fields | Status |
+- ✅ `POST /api/forms/:formId/submit`, per-template Zod validation, field-level errors
+- ✅ Unknown fields preserved into `raw_payload`
+- ✅ Business-email enforcement (newsletter exempt)
+- ✅ Idempotency on `submission_uuid`
+- ✅ Server-owned fields stripped before validation
+- ✅ Rate limiting, 5/IP/hour
+- ✅ Response leaks no score, tier or assignee
+
+Deliberate deviations from the spec: phone optional on `quick_capture`;
+`framework_interest` added to `demo_form`; MX lookup moved off the request path.
+
+### Hidden fields — 30 accepted
+
+UTM ×5 · `first_touch_src` / `last_touch_src` · `page_url` (with query string) ·
+`referrer_url` · `landing_page` · `gclid` / `fbclid` / `msclkid` / `li_fat_id` ·
+`session_id` · `pages_viewed` · `page_journey` · `visit_count` · `time_on_site_sec` ·
+`days_since_first_visit` · `visited_pricing` · `scroll_depth` · `device_type` ·
+`browser_language` · `browser_timezone` · `form_render_ms` · `website` (honeypot) ·
+`recaptcha_token`
+
+Server-derived, never trusted from the client: `ip_address`, `user_agent`,
+`geo_country` (CDN header), device fallback, `consent_ip`.
+
+⚠️ The frontend snippet that produces these lives in
+`docs/setup/07-connect-frontend-backend.md` and **is not deployed anywhere yet**.
+
+---
+
+## 2. Anti-bot and junk — ✅ COMPLETE
+
+Honeypot · submit-speed · reCAPTCHA v3 · rate limit.
+
+Failing submissions go to `junk_submissions` with their **full payload**, generate no
+jobs, and never create a Lead. 90-day retention; promoted rows never pruned.
+
+- ✅ `promoteJunkSubmission()` — replays through the normal submit path, so a promoted
+  lead is scored and routed identically
+- ✅ `listJunkForReview()` — orders `low_score` first, since that is reCAPTCHA's
+  judgement rather than a hard signal
+- ✅ Counts by reason on `/health`
+- ⬜ **No review UI or endpoint.** The functions exist, nothing exposes them. Use
+  Prisma Studio until the admin API lands
+
+---
+
+## 3. Scoring and routing — ✅ COMPLETE
+
+Four capped dimensions summing to 100: `form_intent` 30, `firmographic` 25,
+`job_title` 25, `behavioral` 20. Every award is a ledger row with a readable reason;
+`leads.lead_score` is the rollup.
+
+Tiers: 80–100 `enterprise_ae` (1h SLA) · 50–79 `sdr` (4h) · 30–49 `nurture` · 0–29
+`marketing_drip`. `inquiry_type` bypass for support / partnership / media.
+
+⚠️ **The weights are an informed guess and have never been checked against real
+outcomes.** Once 20–30 leads have known results, compare: are ⭐⭐⭐ leads actually the
+ones converting? Retune if not. This is the feedback loop that makes scoring worth
+having.
+
+---
+
+## 4. Job queue — ✅ COMPLETE
+
+Database table, polled, enqueued inside the write transaction.
+
+Retries with exponential backoff + jitter · per-type budgets (`crm_push` 8,
+`ai_extract` 2) · lease expiry for crashed workers · dead-lettering · 7-day pruning of
+succeeded rows · depth on `/health` · idempotent handlers.
+
+Worker runs in-process. `RUN_WORKER=false` splits it out.
+
+---
+
+## 5. Automation Layer 1 — 🟡 BUILT, PARTLY LIVE
+
+| Job | Built | Live | Blocker |
 |---|---|---|---|
-| Quick capture | `quick_capture` | 4 (name, email, phone*, company) | ✅ |
-| Footer / newsletter | `footer_form` | 1–2 (email, name) | ✅ |
-| Book a demo | `demo_form` | 7–8 + framework interest | ✅ |
-| Contact us | `contact_form` | 7–8 + inquiry type + message | ✅ |
+| `enrich` | ✅ | ✅ | — |
+| `fallback_task` | ✅ | ✅ | — |
+| `ai_extract` | ✅ | ✅ | — |
+| `crm_push` | ✅ | ✅ | — |
+| `confirmation_email` | ✅ | 🚫 | no email provider |
+| `slack_alert` | ✅ | 🚫 | no webhook URL |
+| `calendar_send` | ✅ | 🚫 | no booking URL |
 
-\* Phone is **optional** on quick capture — deliberate deviation from the spec. GRC
-buyers withhold a phone number on a first popup, and the spec already qualifies on the
-sales call rather than the form.
+Unconfigured providers log their intent and record the event as `skipped`, never
+`success` — the audit trail must not claim an email was sent when it was not.
 
-Also added beyond the spec: `framework_interest` on the demo form, because Layer 2
-nurture branches on framework and the spec's only source for it was AI-parsing the
-free-text box.
-
-### Endpoint — ✅
-
-- ✅ `POST /api/forms/:formId/submit`
-- ✅ Per-template Zod validation, field-level error responses
-- ✅ Unknown fields preserved into `raw_payload` (forensic record)
-- ✅ Business-email enforcement — free/disposable providers blocked on lead forms,
-  newsletter exempt
-- ✅ Idempotency on `submission_uuid` — double-click replays the original response
-- ✅ Server-owned fields stripped (`lead_score`, `assigned_to`, `routing_tier`, …)
-- ✅ Rate limiting, 5 per IP per hour
-- ✅ Opaque response — no score, tier or assignee leaked to the browser
-
-### Hidden fields — ✅ 30 accepted, all stored
-
-| Group | Fields | Status |
-|---|---|---|
-| UTM | `utm_source` `utm_medium` `utm_campaign` `utm_term` `utm_content` | ✅ |
-| Attribution | `first_touch_src` (write-once) `last_touch_src` | ✅ |
-| Page context | `page_url` `referrer_url` `landing_page` | ✅ |
-| Session | `session_id` `pages_viewed` `visit_count` `time_on_site_sec` `visited_pricing` | ✅ |
-| Device | `device_type` | ✅ |
-| Anti-bot | `form_render_ms` `website` (honeypot) `recaptcha_token` | ✅ |
-
-Server-derived, never trusted from the client:
-
-| Field | Source | Status |
-|---|---|---|
-| `ip_address` | `cf-connecting-ip` → `x-forwarded-for[0]` → `x-real-ip` | ✅ |
-| `user_agent` | request header | ✅ |
-| `geo_country` | `cf-ipcountry` | ✅ |
-| device fallback | parsed from user agent when the client sent none | ✅ |
-| `consent_ip` | client IP at time of consent | ✅ |
-| `geo_region` `geo_city` `geo_timezone` `geo_isp` | IP lookup in the enrich job | ✅ |
-
-All hidden fields are optional — a missing UTM parameter must never cost a real lead.
-Over-long strings are truncated, not rejected.
-
-### Anti-bot — ✅
-
-- ✅ Honeypot field
-- ✅ Submit-speed check (under 3s = bot)
-- ✅ reCAPTCHA v3 with score threshold
-- ✅ Rate limit
-- ✅ **Quarantine, never drop.** Failed submissions go to `junk_submissions` with
-  their full payload, never to `leads`. Lead counts, exports and CRM pushes stay clean
-- ✅ **Promotion path** — `promoteJunkSubmission()` replays a false positive through
-  the normal submit path, so it is scored and routed identically. reCAPTCHA scores
-  corporate VPNs low, so this is not hypothetical
-- ✅ 90-day retention; promoted rows are never pruned
-- ✅ Bots receive a normal `200` — telling a bot it was caught only helps it
-- ✅ Bots generate zero automation jobs
+🟡 **`ai_extract` is keyword matching, not an LLM.** Deliberate: the signals here
+(framework names, urgency words) are keyword-shaped, so a deterministic pass is free,
+instant and testable. Swap in an LLM when there is something genuinely semantic to
+extract — one function in `src/queue/handlers.ts`.
 
 ---
 
-## 2. Data pipeline — ✅ COMPLETE
+## 6. Odoo CRM — ✅ LIVE
 
-| Stage | Status | Notes |
-|---|---|---|
-| 1. Capture | ✅ | Client snippet contract documented in README |
-| 2. Validate | ✅ | MX lookup deferred to `enrich` — DNS is too slow for the request path |
-| 3. Store | ✅ | One transaction across lead + submission + tracking |
-| 4. Score | ✅ | Runs inline; moves to the worker when volume justifies it |
-| 5. Route | ✅ | Tiers, SLA deadlines, inquiry-type bypass |
+Instance `https://deepnotch.odoo.com`, database `deepnotch`, Odoo 19.4 Enterprise.
+Configured: team `Inbound`; stages New → Contacted → Meeting → Proposal → Won; lost
+reasons Dead, Junk, Out of Scope, Bad Timing, Competitor.
 
-### Schema — ✅ 8 tables
+Verified live: a demo submission became a 94-point Opportunity with ★★★, country from
+the CDN header, a German phone normalised to E.164, native UTM mapping, tier and
+framework tags, and a description covering attribution, behaviour, page journey and
+context.
 
-| Table | Purpose | Status |
-|---|---|---|
-| `leads` | One row per person, dedup on email | ✅ |
-| `form_submissions` | One per submit event, many per lead | ✅ |
-| `tracking_data` | The hidden fields | ✅ |
-| `lead_scores` | Append-only ledger | ✅ |
-| `newsletter_subscribers` | Suppression list | ✅ |
-| `automation_events` | Audit trail | ✅ |
-| `jobs` | Work queue | ✅ |
-| `junk_submissions` | Quarantine for failed anti-bot checks | ✅ |
+⚠️ **The API key expires 3 months from 2026-09-23.** Odoo 19 requires an expiry and
+offers no "never". `/health` reports `crm: ok`, so expiry is visible rather than
+silent. Rotate: new key → update `ODOO_API_KEY` → redeploy.
 
-Deviations from the spec, with reasons, are in `docs/database-design.md`.
-
-### Scoring — ✅
-
-| Dimension | Cap | Status |
-|---|---|---|
-| `form_intent` | 30 | ✅ |
-| `firmographic` | 25 | ✅ |
-| `job_title` | 25 | ✅ |
-| `behavioral` | 20 | ✅ |
-
-- ✅ Each dimension independently capped; total can never exceed 100
-- ✅ Every award written as a ledger row with a readable reason
-- ✅ Rollup denormalised onto `leads.lead_score`
-- ✅ Title matching is most-senior-first, so "VP of Risk and Compliance" does not
-  score as a manager
-
-### Routing — ✅
-
-| Score | Tier | SLA | Slack | Drip | Status |
-|---|---|---|---|---|---|
-| 80–100 | `enterprise_ae` | 1 h | yes | no | ✅ |
-| 50–79 | `sdr` | 4 h | demo only | yes | ✅ |
-| 30–49 | `nurture` | — | no | yes | ✅ |
-| 0–29 | `marketing_drip` | — | no | no | ✅ |
-
-- ✅ `inquiry_type` bypass for support / partnership / media
-- ✅ `request_demo` and `general` correctly treated as real sales leads
-- ✅ High scorers excluded from the drip — a rep is calling within the hour
-- ✅ Bots never assigned, never alerted on
+⬜ Not built: SLA → Odoo Activity. Deferred deliberately; with a handful of leads a
+month you will not miss one. A few lines when volume justifies it.
 
 ---
 
-## 3. Job queue — ✅ COMPLETE
+## 7. Email — 🚫 BLOCKED, HIGHEST VALUE
 
-Database-backed, not Redis. Jobs are enqueued **inside the write transaction**, so a
-process that dies immediately after responding still has the work queued.
+**This is the next thing to do.** Follow `docs/setup/02-email-provider.md`. Resend,
+free tier, ~30 minutes of account setup.
 
-- ✅ Enqueue / claim / complete / fail
-- ✅ Exponential backoff with jitter, capped at 1 hour
-- ✅ Per-type retry budgets (`crm_push` 8 attempts, `ai_extract` 2)
-- ✅ Lease expiry — a crashed worker's job is reclaimed, never stranded
-- ✅ Dead-lettering; dead rows kept as the error log
-- ✅ Pruning of succeeded jobs after 7 days
-- ✅ Queue depth on `/health`
-- ✅ Idempotent handlers — a retry does not send a second email
-- ✅ In-process worker, splittable via `RUN_WORKER=false`
+What exists:
 
----
+- ✅ Per-submission idempotency (scoped to submission, not lead — a repeat submitter
+  gets a reply for each form)
+- ✅ Bounce/complaint suppression before sending
+- ✅ Bots never emailed
+- ✅ Retry backoff with jitter
 
-## 4. Automation Layer 1 — ✅ built, 🚫 not live
+What is missing:
 
-All handlers are written, tested and running. Every one records an `automation_events`
-row. But with no credentials configured they run in **simulated mode**: they log what
-they would send and record the event as `skipped` rather than `success`.
-
-| Job | Trigger | Built | Live |
-|---|---|---|---|
-| `enrich` | every submission | ✅ | ✅ |
-| `confirmation_email` | every submission | ✅ | 🚫 no provider |
-| `fallback_task` | every submission | ✅ | ✅ |
-| `crm_push` | every sales submission | ✅ Odoo | 🚫 no credentials |
-| `slack_alert` | demo intent only | ✅ | 🚫 no webhook |
-| `calendar_send` | demo intent only | ✅ | 🚫 no booking URL |
-| `ai_extract` | when message text present | ✅ | ✅ |
-
-Notes:
-
-- `enrich` does phone → E.164 (country-aware), company domain, and country from the
-  CDN edge. MaxMind geo is ⬜.
-- `ai_extract` is keyword matching, not an LLM. The signals here are keyword-shaped,
-  so a deterministic pass is free, instant and testable. Swapping in an LLM later
-  costs nothing.
-- Layer 1 keys on `form_id` and `inquiry_type` only, never on `lead_score` — these
-  must fire even if scoring or routing failed.
+- 🚫 `sendEmail()` throws if a key is set — no provider implementation exists yet
+  (`src/services/providers.ts`)
+- ⬜ Provider send-rate cap
+- ⬜ Per-recipient frequency cap
+- ⬜ Global hourly ceiling
+- ⬜ **Unsubscribe suppression on marketing sends.** Only bounced/complained are
+  blocked today. Transactional confirmations are legitimately exempt, but **Layer 5
+  cannot ship without this**
+- ⬜ Bounce/complaint webhook. Nothing currently sets those statuses — they can only
+  be set by hand
 
 ---
 
-## 4b. Email sending controls — 🟡 PARTIAL
+## 8. Layers 2–5 — ⬜ NOT STARTED
 
-What protects outbound mail today:
-
-| Control | Status | Note |
-|---|---|---|
-| Per-submission idempotency | ✅ | A retry never re-sends; a *new* submission always gets its own reply |
-| Bounce / complaint suppression | ✅ | Those addresses are never mailed — continuing damages sending reputation for everyone |
-| Bot suppression | ✅ | Flagged submissions get no outbound mail, so this cannot become a spam amplifier |
-| Retry backoff with jitter | ✅ | An ESP outage does not produce a thundering herd on recovery |
-| **Provider send-rate cap** | ⬜ | ESPs throttle; exceeding it gets mail deferred or the account flagged |
-| **Per-recipient frequency cap** | ⬜ | Nothing stops one person getting several emails in a day once Layer 5 lands |
-| **Global hourly ceiling** | ⬜ | A bug or spam run could fire thousands before anyone notices |
-| **Unsubscribe suppression on marketing sends** | ⬜ | Only bounced/complained are blocked today. Transactional confirmations are legitimately exempt, but **Layer 5 cannot ship without this** |
-| **Bounce / complaint webhook** | ⬜ | Nothing currently sets those statuses — they can only be set by hand |
-
-The worker's `batchSize: 5` and sequential execution act as an accidental throttle,
-but it polls immediately after a full batch, so under a backlog it bursts as fast as
-the database allows. That is an artifact, not a designed limit.
-
-**Before any marketing email ships:** unsubscribe suppression, a global ceiling, and
-a bounce webhook. All three are independent of the CRM decision.
-
----
-
-## 5. Consent and compliance — ✅
-
-Not in the original spec. Added because it is not optional.
-
-- ✅ `consent_given`, `consent_ip`, `consent_text_version`, `consent_at`
-- ✅ Consent can be granted but never silently revoked by a later form
-- ✅ `unsubscribe_token` on every subscriber
-- ✅ `GET`/`POST /api/newsletter/unsubscribe`, `POST /api/newsletter/resubscribe`
-- ✅ Unsubscribe always reports success, even for an unknown token
-- ✅ Suppression survives re-submission — a form submit never resurrects someone who
-  opted out
-- ✅ Bounced and complained addresses cannot be resubscribed by a link click
-- ✅ Logs redact email, phone, IP and raw payload
-
----
-
-## 6. Automation Layers 2–5 — ⬜ NOT STARTED
-
-### Layer 2 — CRM nurture branching ⬜
-
-| Item | Status | Note |
-|---|---|---|
-| Content-topic branching | ⬜ | `landing_page` already captured |
-| Behavioural branching | ⬜ | `pages_viewed` / `visited_pricing` already captured |
-| AI extraction | 🟡 | Keyword version done; CRM property sync ⬜ |
-| Progressive profiling | 🟡 | Gap-filling works; the "ask one more field" endpoint ⬜ |
-
-🚫 **Blocked on the CRM decision** — it determines how much is built here versus
-configured in the vendor.
-
-### Layer 3 — Content repurposing ⬜
-
-Out of scope for this service. Content ops + CMS + the GEO engine. The only piece
-this backend touches is `referrer_url`, already captured.
-
-### Layer 4 — Retention and advocacy ⬜
-
-Needs customer records — onboarding state, NPS, deal stage. There are no customers
-here, only leads. A later phase.
-
-### Layer 5 — Email nurture cadence ⬜
+### Layer 2 — CRM nurture branching
 
 | Item | Status |
 |---|---|
-| 21-day / 8-touch sequence | ⬜ |
-| Send-time optimisation | ⬜ |
-| Mobile-first templates | ⬜ |
-| Drip suppression on human contact | 🟡 `first_contacted_at` column exists, unused |
+| Content-topic branching | ⬜ `landing_page` already captured |
+| Behavioural branching | ⬜ `pages_viewed`, `visited_pricing`, `page_journey` captured |
+| AI extraction → CRM properties | 🟡 extraction done, CRM sync not |
+| Progressive profiling | 🟡 gap-filling works; the "ask one more field" endpoint ⬜ |
 
-⚠️ **Open compliance issue:** the cadence sends SMS on days 6 and 18, but no form
-captures SMS consent. Either add an explicit opt-in checkbox or drop both touches —
-sending without it is TCPA/GDPR exposure.
+No longer blocked — the CRM decision is made.
+
+### Layer 3 — Content repurposing ⬜
+
+Out of scope for this service. Content ops + CMS. The only backend surface is
+`referrer_url`, already captured.
+
+### Layer 4 — Retention and advocacy ⬜
+
+Needs customer records — onboarding state, NPS, deal stage. There are no customers,
+only leads. A later phase.
+
+### Layer 5 — Email nurture cadence ⬜
+
+21-day / 8-touch sequence, send-time optimisation, mobile-first templates.
+
+🟡 `first_contacted_at` exists as a column but is **unused** — it is what should
+suppress the drip once a rep makes contact. Unresolved collision: score 80–100 gets a
+1-hour SLA while the cadence also starts at day 0.
+
+⚠️ **Compliance blocker:** the cadence sends SMS on days 6 and 18, but no form captures
+SMS consent. Add an explicit opt-in checkbox or drop both touches.
 
 ---
 
-## 7. Production readiness — ⬜
+## 9. Production readiness — ⬜
 
 | Item | Status | Note |
 |---|---|---|
-| MySQL migration | ⬜ | Schema is portable; do it before there is production data |
-| Email provider | ⬜ | **Highest value, smallest change** |
-| CRM integration | ⬜ | Vendor undecided |
-| Slack webhook | ⬜ | Config only |
+| MySQL migration | ⬜ | Schema is portable. **Do it before there is production data** |
+| Email provider | 🚫 | Highest value |
+| Slack webhook / calendar URL | ⬜ | Config only, both already coded |
 | Dockerfile | ⬜ | |
 | CI | ⬜ | |
 | Backups | ⬜ | |
 | Shared-store rate limiting | ⬜ | In-memory today, so the limit multiplies per replica |
-| Alerting on dead jobs | ⬜ | Failures are recorded but nobody is told |
+| **Alerting on dead jobs** | ⬜ | Failures are recorded but nobody is told. Biggest blind spot |
 | Production CORS origins | ⬜ | Still localhost |
+| Admin / read API | ⬜ | Leads only visible via Prisma Studio |
 | Load testing | ⬜ | |
-| Read / admin API | ⬜ | Leads only visible via `db:studio` |
 
-Guarded so it cannot ship broken: `env.ts` refuses to boot in production without
-`RECAPTCHA_SECRET_KEY`, or with a wildcard CORS origin.
+Guards that already prevent a bad deploy: production refuses to boot without
+`RECAPTCHA_SECRET_KEY`, or with `*` in `CORS_ORIGINS`.
+
+### MySQL migration — what it involves
+
+`docs/database-design.md` has the detail. Mechanically:
+
+1. Change `provider` in `schema.prisma`
+2. Convert String enum columns to native enums — **the database then starts rejecting
+   bad values. Today `src/schemas/enums.ts` is the only enforcement**
+3. `raw_payload`, `payload`, `page_journey` → `@db.Json`
+4. `Int` PKs → `BigInt @db.UnsignedBigInt`
+5. Add `@db.VarChar(n)` / `@db.Text`
+6. Delete `prisma/migrations/`, regenerate, re-run the suite
+7. Remove the SQLite PRAGMA block in `src/db.ts`
+
+Half a day.
 
 ---
 
-## 8. Open decisions
+## 10. Traps that will cost you an hour
 
-| Decision | Blocks | Notes |
-|---|---|---|
-| ~~CRM vendor~~ | — | ✅ **Decided: Odoo.** Integration built and tested |
-| **Email provider** | Layer 1 going live | SendGrid / Postmark / CRM-native |
-| **SMS consent** | Layer 5 | Add a checkbox or drop the two SMS touches |
-| **Form placement matrix** | nothing | Affects `form_name` values only, no schema change |
-| **Drip vs SLA collision** | Layer 5 | Suppression rule keyed on `first_contacted_at` |
+**Corporate TLS interception.** On the original developer machine Node does not trust
+the proxy CA. Prisma engine downloads and every Odoo call fail with `fetch failed` or
+`unable to get local issuer certificate`:
+
+```bash
+NODE_OPTIONS=--use-system-ca npx prisma migrate dev
+NODE_OPTIONS=--use-system-ca npm run dev
+```
+
+Not needed in production.
+
+**`.env` is not auto-loaded.** Node needs `--env-file`. The npm scripts pass it; a bare
+`tsx src/index.ts` exits complaining `DATABASE_URL: Required`.
+
+**Tests must never touch live services.** `tests/setup.ts` loads `.env` and then
+*clears* `ODOO_*`, `EMAIL_PROVIDER_API_KEY`, `SLACK_WEBHOOK_URL` and
+`RECAPTCHA_SECRET_KEY`. Without that, adding real credentials points the suite at the
+production Odoo instance and creates junk records there.
+`tests/integration/odoo.test.ts` starts its own stub server.
+
+**Server startup takes ~12s** with tsx + Prisma. A scripted `curl` immediately after
+launch gets an empty response. Not a bug.
+
+**`env` is frozen at import.** Mutating `process.env` afterwards has no effect — tests
+needing different config must set it before importing, or use a stub.
+
+**PRAGMA statements need `$queryRawUnsafe`.** Several return a row, and
+`$executeRawUnsafe` rejects any statement that returns results.
+
+**IP geolocation sends the visitor IP to a third party** (`ip-api.com`), which makes it
+a data processor under GDPR — it belongs in the privacy policy. `GEO_PROVIDER=none`
+disables it. Swapping to a local MaxMind database means replacing one function in
+`src/services/geo.ts`.
 
 ---
 
-## 9. Suggested order
+## 11. Suggested order
 
-1. **Email provider** — stops leads arriving silently. Highest value, smallest change.
-2. **MySQL swap** — cheaper now than after there is production data.
-3. **Deployment** — Dockerfile, env config, backups, dead-job alerting.
-4. **CRM decision**, then Layer 2.
-5. **Layer 5**, once SMS consent is resolved.
+1. **Email provider** — stops leads arriving unnoticed. Highest value
+2. **MySQL migration** — cheaper now than after production data exists
+3. **Deployment** — Dockerfile, env config, backups, dead-job alerting
+4. **Admin API** — so the team can see leads and review junk without database access
+5. **Layer 2** — no longer blocked
+6. **Layer 5** — once SMS consent and the drip/SLA collision are resolved
+
+---
+
+## 12. Where things live
+
+```
+server/
+  prisma/schema.prisma          9 models
+  src/
+    routes/submit.ts            the only public write endpoint
+    services/
+      scoring.ts  routing.ts    pure functions, unit-tested
+      antibot.ts  junk.ts       quarantine + promotion
+      persist.ts                the write transaction
+      odoo.ts                   CRM client (JSON-RPC)
+      providers.ts              email / Slack / CRM seam
+      geo.ts                    IP lookup
+    queue/
+      driver.ts                 enqueue / claim / complete / fail
+      dispatch.ts               which jobs a submission triggers
+      handlers.ts               Layer 1
+  docs/
+    setup/                      11 step-by-step guides, 01 → 11
+    database-design.md          schema reference + MySQL swap path
+    api-examples.md             every request as curl
+    postman_collection.json     19 requests, importable
+    specs/                      the two original design documents
+```
 
 ---
 
@@ -336,11 +368,15 @@ Guarded so it cannot ship broken: `env.ts` refuses to boot in production without
 
 | Date | Change |
 |---|---|
-| 2026-09-22 | Form intake, validation, anti-bot, schema, scoring, routing, consent — complete |
-| 2026-09-22 | Job queue + Automation Layer 1 — complete |
+| 2026-09-22 | Form intake, validation, anti-bot, schema, scoring, routing, consent |
+| 2026-09-22 | Job queue + Automation Layer 1 |
 | 2026-09-22 | Fixed: idempotency guard treated a simulated send as un-done, so retries re-sent |
 | 2026-09-22 | Fixed: phone normalisation hardcoded `US`, corrupting international numbers |
-| 2026-09-22 | Fixed: `clientCountry` / device fallback were written but never called — geo chain was dead |
-| 2026-09-22 | Fixed: confirmation dedup was scoped per *lead*, so a repeat submitter got silence on their second form. Now scoped per submission |
-| 2026-09-22 | Added: bounced/complained addresses are suppressed before sending |
-| 2026-09-22 | Added: `automation_events.submission_id` — the audit trail now records which submission triggered each automation |
+| 2026-09-22 | Fixed: `clientCountry` / device fallback written but never called — geo chain was dead |
+| 2026-09-22 | Fixed: confirmation dedup scoped per *lead*, so a repeat submitter got silence |
+| 2026-09-22 | Odoo CRM integration; `automation_events.submission_id` added |
+| 2026-09-23 | Junk quarantine table + promotion path |
+| 2026-09-23 | Odoo connectivity on `/health` so key expiry is visible |
+| 2026-09-23 | Fixed: test suite was reaching the live Odoo instance |
+| 2026-09-23 | Tracking expanded 19 → 30 fields; full detail surfaced in Odoo; IP geolocation |
+| 2026-09-23 | Fixed: `getCookie` regex in the documented snippet read only the first cookie |

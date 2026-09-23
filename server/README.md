@@ -1,5 +1,9 @@
 # dn-backend
 
+> **Picking this up cold?** Read **[docs/TRACKER.md](docs/TRACKER.md)** first. It has
+> what is done, what is half-done and exactly what is missing, the decisions already
+> settled and why, and the traps that will otherwise cost you an hour.
+
 Backend for the GRC SaaS marketing site. Receives form submissions, scores and routes
 them into sales tiers, and keeps an auditable record of every automation that fires.
 
