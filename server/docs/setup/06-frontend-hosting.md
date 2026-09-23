@@ -112,6 +112,32 @@ POST https://api.deepnotch.ai/api/forms/{formId}/submit
 | Book a demo | `demo_form` |
 | Contact | `contact_form` |
 
+**Demo form fields** (10 — this is the upper limit; more will show drop-off):
+
+```
+First name *          Last name *
+Work email *          Phone *
+Company name *        Job title *
+Company size *        Country *
+Solution interest *   Framework interest
+Message (optional)    Consent checkbox *
+```
+
+- `country` — ISO 3166-1 alpha-2 (`DE`, `US`, `IN`). Asked explicitly because GRC is
+  jurisdiction-specific and IP-derived country is wrong often enough to matter — a
+  corporate VPN routinely reports the wrong one
+- `solution_interest` — multi-select, at least one: `risk_management`,
+  `ai_governance`, `compliance_automation`, `not_sure`. Changes what the demo covers
+
+**Deliberately NOT on the form:**
+
+| Field | Why not |
+|---|---|
+| "How did you hear about us?" | Already tracked — landing page, referrer, UTM, first touch, click id. Self-reported source is unreliable; people answer "Google" when they came from LinkedIn |
+| Industry | `framework_interest` already gives the answer industry would only imply |
+| "Do you have SOC 2 already?" | A good question, but it belongs in qualification. A rep gets it in 30 seconds; on the form it costs conversion |
+| Budget | Kills conversion, and the answer is unreliable |
+
 **Every submission must include:**
 
 | Field | Why |

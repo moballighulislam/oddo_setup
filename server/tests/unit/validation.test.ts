@@ -53,6 +53,8 @@ describe('form schemas', () => {
       company_name: 'Acme',
       job_title: 'CISO',
       company_size: '1000+',
+      country: 'GB',
+      solution_interest: ['compliance_automation'],
     });
     expect(r.success).toBe(false);
   });
@@ -68,6 +70,8 @@ describe('form schemas', () => {
         company_name: 'Acme',
         job_title: 'CISO',
         company_size: '1000+',
+        country: 'GB',
+        solution_interest: ['compliance_automation'],
       });
       expect(r.success, `rejected ${phone}`).toBe(true);
     }
@@ -83,6 +87,8 @@ describe('form schemas', () => {
       company_name: 'Acme',
       job_title: 'CISO',
       company_size: 'enormous',
+      country: 'GB',
+      solution_interest: ['compliance_automation'],
     });
     expect(r.success).toBe(false);
   });
@@ -214,5 +220,108 @@ describe('email domain rules', () => {
 
   it('extracts the domain for enrichment', () => {
     expect(emailDomain('Jane@Acme.COM')).toBe('acme.com');
+  });
+});
+
+describe('country and solution interest', () => {
+  const demo = (over: Record<string, unknown> = {}) => ({
+    submission_uuid: uuid(),
+    first_name: 'Jane',
+    last_name: 'Doe',
+    email: 'jane@acme-corp.com',
+    phone: '+15551234567',
+    company_name: 'Acme',
+    job_title: 'CISO',
+    company_size: '1000+',
+    country: 'DE',
+    solution_interest: ['compliance_automation'],
+    ...over,
+  });
+
+  it('requires both on the demo form', () => {
+    expect(FORM_SCHEMAS.demo_form.safeParse(demo()).success).toBe(true);
+    expect(FORM_SCHEMAS.demo_form.safeParse(demo({ country: undefined })).success).toBe(false);
+    expect(
+      FORM_SCHEMAS.demo_form.safeParse(demo({ solution_interest: undefined })).success,
+    ).toBe(false);
+  });
+
+  it('normalises the country code to uppercase', () => {
+    const r = FORM_SCHEMAS.demo_form.safeParse(demo({ country: 'de' }));
+    expect(r.success && r.data.country).toBe('DE');
+  });
+
+  it('rejects anything that is not a two-letter code', () => {
+    for (const bad of ['Germany', 'D', 'DEU', '12']) {
+      expect(FORM_SCHEMAS.demo_form.safeParse(demo({ country: bad })).success, bad).toBe(false);
+    }
+  });
+
+  it('accepts several solutions but rejects an empty list', () => {
+    expect(
+      FORM_SCHEMAS.demo_form.safeParse(
+        demo({ solution_interest: ['risk_management', 'ai_governance'] }),
+      ).success,
+    ).toBe(true);
+    expect(FORM_SCHEMAS.demo_form.safeParse(demo({ solution_interest: [] })).success).toBe(false);
+  });
+
+  it('rejects an unknown solution', () => {
+    expect(
+      FORM_SCHEMAS.demo_form.safeParse(demo({ solution_interest: ['blockchain'] })).success,
+    ).toBe(false);
+  });
+
+  it('leaves country optional on the contact form', () => {
+    // That form is used when something is already wrong; extra friction is worse
+    // than a missing country.
+    const r = FORM_SCHEMAS.contact_form.safeParse({
+      submission_uuid: uuid(),
+      first_name: 'Tara',
+      last_name: 'Singh',
+      email: 'tara@acme-corp.com',
+      phone: '+15551234567',
+      company_name: 'Acme',
+      inquiry_type: 'support',
+      message: 'SSO broken',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('does not ask the low-commitment forms for either', () => {
+    expect(
+      FORM_SCHEMAS.quick_capture.safeParse({
+        submission_uuid: uuid(),
+        full_name: 'Jane Doe',
+        email: 'jane@acme-corp.com',
+        company_name: 'Acme',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('carries both through normalise', () => {
+    const n = normalise('demo_form', demo() as never);
+    expect(n.countryCode).toBe('DE');
+    expect(n.solutionInterest).toEqual(['compliance_automation']);
+  });
+});
+
+describe('regionForCountry', () => {
+  it('groups countries into the regions that share a compliance regime', async () => {
+    const { regionForCountry } = await import('../../src/schemas/enums.js');
+    expect(regionForCountry('DE')).toBe('eu');
+    expect(regionForCountry('FR')).toBe('eu');
+    expect(regionForCountry('GB')).toBe('uk'); // left the EU, different regime
+    expect(regionForCountry('US')).toBe('us');
+    expect(regionForCountry('IN')).toBe('apac');
+    expect(regionForCountry('AE')).toBe('mea');
+    expect(regionForCountry('BR')).toBe('latam');
+    expect(regionForCountry('XX')).toBe('other');
+    expect(regionForCountry(null)).toBeNull();
+  });
+
+  it('is case-insensitive', async () => {
+    const { regionForCountry } = await import('../../src/schemas/enums.js');
+    expect(regionForCountry('de')).toBe('eu');
   });
 });

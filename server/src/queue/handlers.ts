@@ -417,6 +417,8 @@ const crmPush: JobHandler = async (payload, jobId) => {
     leadScore: lead.leadScore,
     routingTier: lead.routingTier,
     frameworkInterest: lead.frameworkInterest,
+    solutionInterest: lead.solutionInterest,
+    regionGroup: lead.regionGroup,
     // The ledger, so a human sees why it scored what it did rather than a bare number.
     scoreBreakdown: lead.scores.map((s) => `+${s.points} — ${s.reason}`),
     formId: submission.formId,

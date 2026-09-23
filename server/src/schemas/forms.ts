@@ -12,9 +12,11 @@
 import { z } from 'zod';
 import {
   COMPANY_SIZES,
+  CountryCodeSchema,
   FRAMEWORKS,
   INQUIRY_TYPES,
   KNOWN_FORM_NAMES,
+  SOLUTIONS,
   type FormId,
 } from './enums.js';
 import { HiddenFieldsSchema } from './hidden.js';
@@ -111,6 +113,15 @@ export const DemoFormSchema = base
     company_name: company,
     job_title: z.string().trim().min(1).max(150),
     company_size: z.enum(COMPANY_SIZES),
+
+    // Asked explicitly rather than derived from the IP. GRC is jurisdiction-specific,
+    // and a corporate VPN routinely reports the wrong country.
+    country: CountryCodeSchema,
+
+    // Which product area. This changes what the demo actually covers, so the rep
+    // needs it before the call rather than discovering it in the first five minutes.
+    solution_interest: z.array(z.enum(SOLUTIONS)).min(1).max(4),
+
     framework_interest: z.array(z.enum(FRAMEWORKS)).max(10).optional(),
     message: z.string().trim().max(5000).optional(),
   })
@@ -129,6 +140,10 @@ export const ContactFormSchema = base
     phone,
     company_name: company,
     job_title: z.string().trim().min(1).max(150).optional(),
+    // Optional here: a support ticket or a press enquiry does not need a country,
+    // and requiring it would add friction to a form people use when something is
+    // already wrong.
+    country: CountryCodeSchema.optional(),
     inquiry_type: z.enum(INQUIRY_TYPES),
     message: z.string().trim().min(1, 'message is required').max(5000),
   })
@@ -170,6 +185,8 @@ export interface NormalisedSubmission {
   jobTitle?: string;
   companySize?: string;
   frameworkInterest?: string[];
+  solutionInterest?: string[];
+  countryCode?: string;
   inquiryType?: string;
   message?: string;
   consentGiven: boolean;
@@ -218,6 +235,10 @@ export function normalise(_formId: FormId, data: AnyFormInput): NormalisedSubmis
     frameworkInterest: Array.isArray(d.framework_interest)
       ? (d.framework_interest as string[])
       : undefined,
+    solutionInterest: Array.isArray(d.solution_interest)
+      ? (d.solution_interest as string[])
+      : undefined,
+    countryCode: str('country'),
     inquiryType: str('inquiry_type'),
     message: str('message'),
     consentGiven: d.consent_given === true,

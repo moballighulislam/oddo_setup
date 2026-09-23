@@ -220,6 +220,8 @@ export interface OdooLeadInput {
   leadScore: number;
   routingTier: string | null;
   frameworkInterest: string | null;
+  solutionInterest: string | null;
+  regionGroup: string | null;
   /** Readable score breakdown, so a human sees why it scored what it did. */
   scoreBreakdown: string[];
   formId: string;
@@ -335,7 +337,9 @@ function buildDescription(input: OdooLeadInput): string {
   // --- firmographics ---
   const firmo: string[] = [];
   if (input.companySize) firmo.push(row('Company size', input.companySize));
+  if (input.solutionInterest) firmo.push(row('Solution interest', input.solutionInterest));
   if (input.frameworkInterest) firmo.push(row('Frameworks', input.frameworkInterest));
+  if (input.regionGroup) firmo.push(row('Region', input.regionGroup.toUpperCase()));
   if (firmo.length) out.push(`<p><b>Company</b></p><ul>${firmo.join('')}</ul>`);
 
   // --- how they found you ---
@@ -437,6 +441,7 @@ export async function pushLead(input: OdooLeadInput): Promise<OdooPushResult> {
   const tagNames = [
     input.routingTier,
     ...(input.frameworkInterest?.split(',').filter(Boolean) ?? []),
+    ...(input.solutionInterest?.split(',').filter(Boolean) ?? []),
   ].filter((t): t is string => Boolean(t));
 
   const tagIds: number[] = [];

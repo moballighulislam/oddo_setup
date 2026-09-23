@@ -74,6 +74,68 @@ export const FRAMEWORKS = [
 export const FrameworkSchema = z.enum(FRAMEWORKS);
 export type Framework = z.infer<typeof FrameworkSchema>;
 
+/**
+ * Product areas a buyer can be interested in.
+ *
+ * This changes the demo itself, so the rep needs it before the call rather than
+ * discovering it in the first five minutes.
+ */
+export const SOLUTIONS = [
+  'risk_management',
+  'ai_governance',
+  'compliance_automation',
+  'not_sure',
+] as const;
+export const SolutionSchema = z.enum(SOLUTIONS);
+export type Solution = z.infer<typeof SolutionSchema>;
+
+/**
+ * Country, as an ISO 3166-1 alpha-2 code.
+ *
+ * Not an enum: a 249-entry list would be noise here, and the frontend renders the
+ * dropdown anyway. Two uppercase letters is the whole contract.
+ *
+ * Worth asking explicitly rather than deriving from the IP — GRC is
+ * jurisdiction-specific (GDPR and the EU AI Act versus SOC 2 versus DPDP), and
+ * IP-derived country is wrong often enough to matter. A corporate VPN routinely
+ * reports the wrong country.
+ */
+export const CountryCodeSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .length(2, 'must be a two-letter ISO country code')
+  .regex(/^[A-Z]{2}$/, 'must be a two-letter ISO country code');
+
+/**
+ * Coarse region, derived from the country code.
+ *
+ * Useful because the frameworks that matter are regional: EU buyers care about GDPR
+ * and the EU AI Act, US buyers about SOC 2, and so on.
+ */
+export const REGIONS = ['eu', 'uk', 'us', 'apac', 'mea', 'latam', 'other'] as const;
+export type Region = (typeof REGIONS)[number];
+
+const EU_COUNTRIES = new Set([
+  'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV',
+  'LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE',
+]);
+const APAC = new Set(['IN','SG','AU','NZ','JP','KR','CN','HK','MY','ID','TH','PH','VN','TW','BD','PK','LK']);
+const MEA = new Set(['AE','SA','QA','KW','BH','OM','IL','ZA','NG','KE','EG','TR','MA','GH']);
+const LATAM = new Set(['BR','MX','AR','CL','CO','PE','UY','EC','CR','PA']);
+
+export function regionForCountry(code: string | null | undefined): Region | null {
+  if (!code) return null;
+  const c = code.toUpperCase();
+  if (EU_COUNTRIES.has(c)) return 'eu';
+  if (c === 'GB') return 'uk';
+  if (c === 'US' || c === 'CA') return 'us';
+  if (APAC.has(c)) return 'apac';
+  if (MEA.has(c)) return 'mea';
+  if (LATAM.has(c)) return 'latam';
+  return 'other';
+}
+
 // ---------------------------------------------------------------------------
 // Lead lifecycle
 // ---------------------------------------------------------------------------

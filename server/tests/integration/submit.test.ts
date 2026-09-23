@@ -49,6 +49,8 @@ function demoPayload(overrides: Record<string, unknown> = {}) {
     company_name: 'Meridian Bank',
     job_title: 'Chief Information Security Officer',
     company_size: '1000+',
+    country: 'DE',
+    solution_interest: ['compliance_automation'],
     consent_given: true,
     form_render_ms: 45_000,
     ...overrides,
@@ -428,5 +430,72 @@ describe('GET /health', () => {
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.statusCode).toBe(200);
     expect(res.json().checks.database).toBe('ok');
+  });
+});
+
+describe('country and solution', () => {
+  it('stores a declared country and derives its region', async () => {
+    const payload = demoPayload({ country: 'FR' });
+    await post('demo_form', payload);
+
+    const lead = await prisma.lead.findUniqueOrThrow({
+      where: { email: payload.email as string },
+    });
+    expect(lead.countryCode).toBe('FR');
+    expect(lead.regionGroup).toBe('eu');
+  });
+
+  it('prefers the declared country over the one derived from the IP', async () => {
+    // A corporate VPN routinely reports the wrong country, and GRC is
+    // jurisdiction-specific enough that getting it wrong sends the wrong frameworks.
+    const payload = demoPayload({ country: 'IN' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/forms/demo_form/submit',
+      headers: { 'cf-ipcountry': 'DE' },
+      payload,
+    });
+    expect(res.statusCode).toBe(200);
+
+    const lead = await prisma.lead.findUniqueOrThrow({
+      where: { email: payload.email as string },
+    });
+    expect(lead.countryCode).toBe('IN');
+    expect(lead.regionGroup).toBe('apac');
+  });
+
+  it('falls back to the CDN country when the form did not ask', async () => {
+    const email = `nocountry.${tag()}@acme-corp.com`;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/forms/footer_form/submit',
+      headers: { 'cf-ipcountry': 'GB' },
+      payload: { submission_uuid: randomUUID(), email, consent_given: true },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const lead = await prisma.lead.findUniqueOrThrow({ where: { email } });
+    expect(lead.countryCode).toBe('GB');
+    expect(lead.regionGroup).toBe('uk');
+  });
+
+  it('stores solution interest as a comma-separated list', async () => {
+    const payload = demoPayload({
+      solution_interest: ['risk_management', 'ai_governance'],
+    });
+    await post('demo_form', payload);
+
+    const lead = await prisma.lead.findUniqueOrThrow({
+      where: { email: payload.email as string },
+    });
+    expect(lead.solutionInterest).toBe('risk_management,ai_governance');
+  });
+
+  it('rejects a demo submission missing country or solution', async () => {
+    const { country, ...noCountry } = demoPayload();
+    expect((await post('demo_form', noCountry)).statusCode).toBe(400);
+
+    const { solution_interest, ...noSolution } = demoPayload();
+    expect((await post('demo_form', noSolution)).statusCode).toBe(400);
   });
 });

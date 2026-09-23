@@ -13,6 +13,7 @@ import type { NormalisedSubmission } from '../schemas/forms.js';
 import { emailDomain } from './antibot.js';
 import { computeScore, totalScore } from './scoring.js';
 import { route, slaDeadline, statusForTier } from './routing.js';
+import { regionForCountry } from '../schemas/enums.js';
 import { dispatchForSubmission } from '../queue/dispatch.js';
 
 export interface PersistInput {
@@ -115,7 +116,12 @@ export async function persistSubmission(input: PersistInput): Promise<PersistRes
         companySize: data.companySize ?? null,
         frameworkInterest: data.frameworkInterest?.join(',') ?? null,
         companyDomain: emailDomain(data.email),
-        countryCode: input.geoCountry,
+        solutionInterest: data.solutionInterest?.join(',') ?? null,
+        // A declared country beats one derived from the IP. Corporate VPNs routinely
+        // report the wrong country, and GRC is jurisdiction-specific enough that
+        // getting this wrong sends the buyer the wrong frameworks.
+        countryCode: data.countryCode ?? input.geoCountry,
+        regionGroup: regionForCountry(data.countryCode ?? input.geoCountry),
         leadScore: score,
         leadStatus: statusForTier(decision.tier),
         assignedTo: decision.assignedTo,
@@ -137,6 +143,15 @@ export async function persistSubmission(input: PersistInput): Promise<PersistRes
         jobTitle: data.jobTitle ?? undefined,
         companySize: data.companySize ?? undefined,
         frameworkInterest: data.frameworkInterest?.join(',') ?? undefined,
+        solutionInterest: data.solutionInterest?.join(',') ?? undefined,
+        // Only a declared country overwrites what is already there — a later
+        // geo guess must not replace something the visitor told us.
+        ...(data.countryCode
+          ? {
+              countryCode: data.countryCode,
+              regionGroup: regionForCountry(data.countryCode),
+            }
+          : {}),
         lastTouchSource: convertingSource ?? undefined,
         // Consent can be granted but never silently revoked by a later form.
         ...(data.consentGiven

@@ -170,6 +170,8 @@ curl -s -X POST http://localhost:4000/api/forms/demo_form/submit \
     "company_name": "Meridian Bank",
     "job_title": "Chief Information Security Officer",
     "company_size": "1000+",
+    "country": "DE",
+    "solution_interest": ["compliance_automation", "risk_management"],
     "framework_interest": ["soc2", "iso27001"],
     "message": "We have a SOC 2 Type II audit deadline next month. Need evidence collection automated urgently.",
 
@@ -199,6 +201,14 @@ Expected: **score 100**, tier `enterprise_ae`, SLA 1 hour out, and jobs queued f
 `slack_alert`, `calendar_send` and `ai_extract`.
 
 `company_size` must be one of: `1-50` `51-200` `201-1000` `1000+`
+
+`country` is an ISO 3166-1 alpha-2 code, case-insensitive (`de` becomes `DE`).
+**Required on the demo form.** Asked explicitly rather than derived from the IP,
+because GRC is jurisdiction-specific and a corporate VPN routinely reports the wrong
+country. A declared country always overrides the one derived from the CDN header.
+
+`solution_interest` values: `risk_management` `ai_governance` `compliance_automation`
+`not_sure`. At least one required on the demo form — it changes what the demo covers.
 
 `framework_interest` values: `soc2` `iso27001` `hipaa` `gdpr` `pci_dss` `nist`
 `fedramp` `iso42001` `eu_ai_act` `other`

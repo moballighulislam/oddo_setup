@@ -44,6 +44,13 @@ model Lead {
   // GRC-specific: which framework they showed up for. Drives nurture branching.
   frameworkInterest String? @map("framework_interest") // CSV of Framework values
 
+  // Which product area they want. Changes what the demo covers.
+  solutionInterest String? @map("solution_interest") // CSV of Solution values
+
+  // Coarse region derived from countryCode. The frameworks that matter are regional,
+  // so this is worth having as its own filterable value rather than recomputing it.
+  regionGroup String? @map("region_group")
+
   // firmographic enrichment (filled by the enrich job, not by the form)
   companyDomain   String? @map("company_domain")
   companyIndustry String? @map("company_industry")

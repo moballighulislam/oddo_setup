@@ -111,6 +111,8 @@ const baseLead = {
   leadScore: 100,
   routingTier: 'enterprise_ae',
   frameworkInterest: 'soc2,iso27001',
+  solutionInterest: 'compliance_automation,risk_management',
+  regionGroup: 'eu',
   scoreBreakdown: ['+30 — Submitted demo form', '+25 — Company size: 1000+'],
   formId: 'demo_form',
   formName: 'book_a_demo',
@@ -390,6 +392,9 @@ describe('relational fields', () => {
     expect(tagNames).toContain('enterprise_ae');
     expect(tagNames).toContain('soc2');
     expect(tagNames).toContain('iso27001');
+    // Solutions are tagged too, so "everyone wanting AI governance" is one click.
+    expect(tagNames).toContain('compliance_automation');
+    expect(tagNames).toContain('risk_management');
 
     // Odoo's (6, 0, ids) command replaces the whole many2many set.
     expect(createdValues().tag_ids).toEqual([[6, 0, expect.any(Array)]]);
