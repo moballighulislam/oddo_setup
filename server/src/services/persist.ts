@@ -181,11 +181,22 @@ export async function persistSubmission(input: PersistInput): Promise<PersistRes
         pageUrl: hidden.page_url ?? null,
         referrerUrl: hidden.referrer_url ?? null,
         landingPage: hidden.landing_page ?? null,
+        gclid: hidden.gclid ?? null,
+        fbclid: hidden.fbclid ?? null,
+        msclkid: hidden.msclkid ?? null,
+        liFatId: hidden.li_fat_id ?? null,
         sessionId: hidden.session_id ?? null,
         pagesViewed: hidden.pages_viewed ?? null,
         visitCount: hidden.visit_count ?? null,
         timeOnSiteSec: hidden.time_on_site_sec ?? null,
         visitedPricing: hidden.visited_pricing ?? false,
+        // Stored as JSON text — the schema avoids the Json scalar for SQLite
+        // portability. Becomes a real JSON column on the MySQL switch.
+        pageJourney: hidden.page_journey ? JSON.stringify(hidden.page_journey) : null,
+        daysSinceFirstVisit: hidden.days_since_first_visit ?? null,
+        scrollDepth: hidden.scroll_depth ?? null,
+        browserLanguage: hidden.browser_language ?? null,
+        browserTimezone: hidden.browser_timezone ?? null,
         // Client value wins when present — it knows about viewport and touch
         // support, which a user-agent string does not.
         deviceType: hidden.device_type ?? input.deviceTypeFallback,

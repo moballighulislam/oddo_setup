@@ -225,11 +225,35 @@ export interface OdooLeadInput {
   formId: string;
   formName: string;
   message: string | null;
+
+  // --- attribution and behaviour, surfaced so a human can act on it ---
   landingPage: string | null;
   pageUrl: string | null;
+  referrerUrl: string | null;
   utmSource: string | null;
   utmMedium: string | null;
   utmCampaign: string | null;
+  firstTouchSource: string | null;
+  /** Paid click ids, shown so a rep knows this came from an ad. */
+  adClickIds: Record<string, string> | null;
+
+  pageJourney: string[] | null;
+  pagesViewed: number | null;
+  visitCount: number | null;
+  timeOnSiteSec: number | null;
+  daysSinceFirstVisit: number | null;
+  visitedPricing: boolean;
+  scrollDepth: number | null;
+
+  deviceType: string | null;
+  browserLanguage: string | null;
+  browserTimezone: string | null;
+
+  ipAddress: string | null;
+  geoCity: string | null;
+  geoRegion: string | null;
+  geoIsp: string | null;
+  geoIsHosting: boolean | null;
   /** Set when we have pushed this lead before — then we update instead of create. */
   existingOdooId: number | null;
 }
@@ -280,32 +304,103 @@ const FORM_LABELS: Record<string, string> = {
   footer_form: 'Newsletter signup',
 };
 
-/** Odoo's `description` is an HTML field. */
+/**
+ * Odoo's `description` is an HTML field.
+ *
+ * Everything the backend knows goes here, because the alternative is a rep opening
+ * the record, seeing a name and an email, and having no idea whether this person read
+ * one blog post or spent three weeks comparing frameworks. The data is captured
+ * either way - not showing it just wastes it.
+ */
 function buildDescription(input: OdooLeadInput): string {
-  const lines: string[] = [];
+  const out: string[] = [];
+  const row = (label: string, value: string) =>
+    `<li><b>${escapeHtml(label)}:</b> ${escapeHtml(value)}</li>`;
 
-  lines.push(`<p><b>Lead score: ${input.leadScore}/100</b> (${input.routingTier ?? 'unscored'})</p>`);
-
+  // --- score ---
+  out.push(
+    `<p><b>Lead score: ${input.leadScore}/100</b> (${escapeHtml(input.routingTier ?? 'unscored')})</p>`,
+  );
   if (input.scoreBreakdown.length > 0) {
-    lines.push('<ul>');
-    for (const reason of input.scoreBreakdown) lines.push(`<li>${escapeHtml(reason)}</li>`);
-    lines.push('</ul>');
+    out.push('<ul>');
+    for (const reason of input.scoreBreakdown) out.push(`<li>${escapeHtml(reason)}</li>`);
+    out.push('</ul>');
   }
 
+  // --- their words ---
   if (input.message) {
-    lines.push(`<p><b>Their message:</b></p><p>${escapeHtml(input.message)}</p>`);
+    out.push(`<p><b>Their message</b></p><p>${escapeHtml(input.message)}</p>`);
   }
 
+  // --- firmographics ---
+  const firmo: string[] = [];
+  if (input.companySize) firmo.push(row('Company size', input.companySize));
+  if (input.frameworkInterest) firmo.push(row('Frameworks', input.frameworkInterest));
+  if (firmo.length) out.push(`<p><b>Company</b></p><ul>${firmo.join('')}</ul>`);
+
+  // --- how they found you ---
+  // The section that matters most before any paid spend: which content produced this
+  // lead, so the next thing written is an informed decision rather than a guess.
+  const attribution: string[] = [];
+  if (input.landingPage) attribution.push(row('Landed on', input.landingPage));
+  if (input.referrerUrl) attribution.push(row('Referrer', input.referrerUrl));
+  if (input.firstTouchSource) attribution.push(row('First touch', input.firstTouchSource));
+  if (input.utmSource) {
+    attribution.push(
+      row(
+        'Campaign',
+        [input.utmSource, input.utmMedium, input.utmCampaign].filter(Boolean).join(' / '),
+      ),
+    );
+  }
+  if (input.adClickIds) {
+    for (const [k, v] of Object.entries(input.adClickIds)) attribution.push(row(k, v));
+  }
+  if (input.pageUrl) attribution.push(row('Submitted from', input.pageUrl));
+  attribution.push(row('Form', input.formName));
+  out.push(`<p><b>Attribution</b></p><ul>${attribution.join('')}</ul>`);
+
+  // --- what they did ---
+  const behaviour: string[] = [];
+  if (input.visitCount !== null) behaviour.push(row('Visits', String(input.visitCount)));
+  if (input.pagesViewed !== null) {
+    behaviour.push(row('Pages this session', String(input.pagesViewed)));
+  }
+  if (input.timeOnSiteSec !== null) {
+    behaviour.push(row('Time on site', `${Math.round(input.timeOnSiteSec / 60)} min`));
+  }
+  if (input.daysSinceFirstVisit !== null) {
+    // Long evaluation is high intent in GRC, not a stale lead.
+    behaviour.push(row('Evaluating for', `${input.daysSinceFirstVisit} days`));
+  }
+  if (input.scrollDepth !== null) behaviour.push(row('Scroll depth', `${input.scrollDepth}%`));
+  if (input.visitedPricing) behaviour.push(row('Visited pricing', 'yes'));
+  if (behaviour.length) out.push(`<p><b>Behaviour</b></p><ul>${behaviour.join('')}</ul>`);
+
+  // --- the route they took ---
+  if (input.pageJourney && input.pageJourney.length > 0) {
+    out.push(
+      `<p><b>Page journey</b></p><p>${input.pageJourney.map(escapeHtml).join(' &rarr; ')}</p>`,
+    );
+  }
+
+  // --- where and on what ---
   const context: string[] = [];
-  if (input.companySize) context.push(`Company size: ${input.companySize}`);
-  if (input.frameworkInterest) context.push(`Frameworks: ${input.frameworkInterest}`);
-  if (input.landingPage) context.push(`Landed on: ${input.landingPage}`);
-  if (input.pageUrl) context.push(`Submitted from: ${input.pageUrl}`);
-  context.push(`Form: ${input.formName}`);
+  const place = [input.geoCity, input.geoRegion, input.countryCode].filter(Boolean).join(', ');
+  if (place) context.push(row('Location', place));
+  if (input.geoIsp) context.push(row('Network', input.geoIsp));
+  if (input.geoIsHosting) {
+    // A hosting or VPN range is not necessarily junk, but it does explain an odd
+    // reCAPTCHA score.
+    context.push(row('Network type', 'hosting / VPN range'));
+  }
+  if (input.deviceType) context.push(row('Device', input.deviceType));
+  if (input.browserLanguage) context.push(row('Language', input.browserLanguage));
+  if (input.browserTimezone) context.push(row('Timezone', input.browserTimezone));
+  if (input.ipAddress) context.push(row('IP', input.ipAddress));
+  if (context.length) out.push(`<p><b>Context</b></p><ul>${context.join('')}</ul>`);
 
-  lines.push(`<p>${context.map(escapeHtml).join('<br/>')}</p>`);
-
-  return lines.join('');
+  return out.join('');
 }
 
 function escapeHtml(s: string): string {

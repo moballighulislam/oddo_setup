@@ -69,32 +69,54 @@ blind without it.
     return m ? decodeURIComponent(m.pop()) : '';
   }
 
-  // --- UTM capture, persisted for 90 days for multi-touch attribution ---
   var params = new URLSearchParams(location.search);
+
+  // --- UTM, persisted 90 days for multi-touch attribution ---
   ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']
     .forEach(function (k) {
       var v = params.get(k);
       if (v) setCookie(k, v, COOKIE_DAYS);
     });
 
+  // --- Paid click ids ---
+  // Without these you cannot import offline conversions back into the ad platforms,
+  // so they never learn which click became a deal and cannot optimise bidding.
+  // Impossible to backfill, so capture them before any ads run.
+  ['gclid', 'fbclid', 'msclkid', 'li_fat_id'].forEach(function (k) {
+    var v = params.get(k);
+    if (v) setCookie(k, v, COOKIE_DAYS);
+  });
+
   // First touch is WRITE-ONCE: the campaign that originally found them.
   if (!getCookie('first_touch_src')) {
     setCookie('first_touch_src', params.get('utm_source') || 'direct', COOKIE_DAYS);
   }
-  // Last touch updates every visit: the campaign that converted them.
-  setCookie('last_touch_src', params.get('utm_source') || getCookie('last_touch_src') || 'direct', COOKIE_DAYS);
+  setCookie('last_touch_src',
+    params.get('utm_source') || getCookie('last_touch_src') || 'direct', COOKIE_DAYS);
 
-  // Landing page is write-once too — it drives nurture branching by content topic.
+  // Landing page is write-once too - it drives nurture branching by content topic.
   if (!getCookie('landing_page')) setCookie('landing_page', location.pathname, COOKIE_DAYS);
+
+  // First ever visit, for measuring how long they have been evaluating.
+  if (!getCookie('dn_first_seen')) setCookie('dn_first_seen', String(Date.now()), 365);
 
   // --- Session ---
   if (!sessionStorage.getItem('dn_session')) {
-    sessionStorage.setItem('dn_session', 'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+    sessionStorage.setItem('dn_session',
+      'sess_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
     sessionStorage.setItem('dn_started', String(Date.now()));
   }
 
   var pages = parseInt(sessionStorage.getItem('dn_pages') || '0', 10) + 1;
   sessionStorage.setItem('dn_pages', String(pages));
+
+  // The route through the site, not just the count. This is what shows which
+  // content actually produces leads.
+  var journey = [];
+  try { journey = JSON.parse(sessionStorage.getItem('dn_journey') || '[]'); } catch (e) {}
+  journey.push(location.pathname);
+  if (journey.length > 50) journey = journey.slice(-50);
+  sessionStorage.setItem('dn_journey', JSON.stringify(journey));
 
   var visits = parseInt(getCookie('dn_visits') || '0', 10);
   if (!sessionStorage.getItem('dn_counted')) {
@@ -102,32 +124,59 @@ blind without it.
     sessionStorage.setItem('dn_counted', '1');
   }
 
-  // Pricing intent is worth 10 points in the behavioural score.
   if (location.pathname.indexOf('/pricing') === 0) setCookie('dn_pricing', '1', COOKIE_DAYS);
+
+  // --- Scroll depth on this page ---
+  var maxScroll = 0;
+  window.addEventListener('scroll', function () {
+    var h = document.documentElement.scrollHeight - window.innerHeight;
+    if (h <= 0) return;
+    var pct = Math.round((window.scrollY / h) * 100);
+    if (pct > maxScroll) maxScroll = Math.min(100, pct);
+  }, { passive: true });
 
   // --- Collect everything for a submission ---
   window.dnTracking = function () {
+    var firstSeen = parseInt(getCookie('dn_first_seen') || String(Date.now()), 10);
+    var started = parseInt(sessionStorage.getItem('dn_started') || String(Date.now()), 10);
+
     return {
       utm_source: getCookie('utm_source') || undefined,
       utm_medium: getCookie('utm_medium') || undefined,
       utm_campaign: getCookie('utm_campaign') || undefined,
       utm_term: getCookie('utm_term') || undefined,
       utm_content: getCookie('utm_content') || undefined,
+
+      gclid: getCookie('gclid') || undefined,
+      fbclid: getCookie('fbclid') || undefined,
+      msclkid: getCookie('msclkid') || undefined,
+      li_fat_id: getCookie('li_fat_id') || undefined,
+
       first_touch_src: getCookie('first_touch_src') || undefined,
       last_touch_src: getCookie('last_touch_src') || undefined,
-      page_url: location.pathname,
+
+      // Full URL including the query string. location.pathname alone drops
+      // ?ref=, ?variant= and anything else a campaign appended.
+      page_url: location.pathname + location.search,
       referrer_url: document.referrer || undefined,
       landing_page: getCookie('landing_page') || undefined,
+
       session_id: sessionStorage.getItem('dn_session'),
       pages_viewed: parseInt(sessionStorage.getItem('dn_pages') || '1', 10),
+      page_journey: journey,
       visit_count: parseInt(getCookie('dn_visits') || '1', 10),
-      time_on_site_sec: Math.round((Date.now() - parseInt(sessionStorage.getItem('dn_started') || String(Date.now()), 10)) / 1000),
+      time_on_site_sec: Math.round((Date.now() - started) / 1000),
+      days_since_first_visit: Math.floor((Date.now() - firstSeen) / 864e5),
       visited_pricing: getCookie('dn_pricing') === '1',
+      scroll_depth: maxScroll,
+
       device_type: /iPad|Tablet/i.test(navigator.userAgent)
         ? 'tablet'
         : /Mobi|Android|iPhone/i.test(navigator.userAgent)
         ? 'mobile'
         : 'desktop',
+      browser_language: navigator.language || undefined,
+      browser_timezone: (Intl.DateTimeFormat().resolvedOptions() || {}).timeZone || undefined,
     };
   };
 })();

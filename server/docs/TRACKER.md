@@ -3,7 +3,7 @@
 Single source of truth for what is built, what is not, and what is blocked.
 
 **Last updated:** 2026-09-22
-**Tests:** 141 passing · **Typecheck:** clean
+**Tests:** 144 passing · **Typecheck:** clean
 **Spec:** `docs/specs/GRC_SaaS_Automation_Architecture.html`
 
 Legend: ✅ done and tested · 🟡 partial · ⬜ not started · 🚫 blocked
@@ -65,7 +65,7 @@ free-text box.
 - ✅ Rate limiting, 5 per IP per hour
 - ✅ Opaque response — no score, tier or assignee leaked to the browser
 
-### Hidden fields — ✅ 19 accepted, all stored
+### Hidden fields — ✅ 30 accepted, all stored
 
 | Group | Fields | Status |
 |---|---|---|
@@ -85,7 +85,7 @@ Server-derived, never trusted from the client:
 | `geo_country` | `cf-ipcountry` | ✅ |
 | device fallback | parsed from user agent when the client sent none | ✅ |
 | `consent_ip` | client IP at time of consent | ✅ |
-| `geo_region` `geo_city` | ⬜ needs MaxMind | ⬜ |
+| `geo_region` `geo_city` `geo_timezone` `geo_isp` | IP lookup in the enrich job | ✅ |
 
 All hidden fields are optional — a missing UTM parameter must never cost a real lead.
 Over-long strings are truncated, not rejected.

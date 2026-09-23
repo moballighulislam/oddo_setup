@@ -69,6 +69,11 @@ const EnvSchema = z
     ODOO_USERNAME: z.string().default(''),
     ODOO_API_KEY: z.string().default(''),
     ODOO_SALES_TEAM: z.string().default(''),
+
+    // IP geolocation. 'none' disables it entirely — the visitor's IP is then never
+    // sent anywhere, which is the privacy-safe default if that matters more than
+    // city-level data.
+    GEO_PROVIDER: z.enum(['ip-api', 'none']).default('ip-api'),
   })
   // Production must not run with anti-bot disabled or CORS wide open.
   .superRefine((cfg, ctx) => {

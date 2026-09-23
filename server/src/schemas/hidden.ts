@@ -42,9 +42,20 @@ export const HiddenFieldsSchema = z.object({
   last_touch_src: capped(255),
 
   // --- page context ---
+  // Full URL including the query string — the path alone drops ?ref=, ?variant=
+  // and anything else a campaign appended.
   page_url: cappedUrl(1000),
   referrer_url: cappedUrl(1000),
   landing_page: cappedUrl(1000),
+
+  // --- paid click identifiers ---
+  // Required for offline conversion import. Without them the ad platform never
+  // learns which click became a deal and cannot optimise bidding. Impossible to
+  // backfill, so they are captured from day one even before any ads run.
+  gclid: capped(512),
+  fbclid: capped(512),
+  msclkid: capped(512),
+  li_fat_id: capped(512),
 
   // --- session and behaviour; feeds the behavioural scoring dimension ---
   session_id: capped(128),
@@ -52,6 +63,21 @@ export const HiddenFieldsSchema = z.object({
   visit_count: z.coerce.number().int().min(0).max(10_000).optional(),
   time_on_site_sec: z.coerce.number().int().min(0).max(86_400).optional(),
   visited_pricing: z.coerce.boolean().optional(),
+
+  // Ordered list of pages visited this session, newest last. `pages_viewed` is a
+  // count; this is the route they took, which is what shows which content works.
+  page_journey: z.array(z.string().max(500)).max(50).optional(),
+
+  // Days between their first ever visit and this submission. GRC buyers evaluate
+  // for months, so a long gap is high intent rather than a stale lead.
+  days_since_first_visit: z.coerce.number().int().min(0).max(3650).optional(),
+
+  // Furthest scroll reached on the landing page, 0-100.
+  scroll_depth: z.coerce.number().int().min(0).max(100).optional(),
+
+  // Locale signals. An EU visitor cares about different frameworks to a US one.
+  browser_language: capped(35),
+  browser_timezone: capped(64),
 
   // --- device ---
   device_type: z.enum(DEVICE_TYPES).optional(),

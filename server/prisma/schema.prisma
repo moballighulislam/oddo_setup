@@ -161,9 +161,36 @@ model TrackingData {
   lastTouchSrc  String? @map("last_touch_src") // the converting source
 
   // page context
+  // pageUrl is the full URL including the query string. The path alone loses
+  // ?ref=, ?variant= and anything else a campaign appended.
   pageUrl     String? @map("page_url")
   referrerUrl String? @map("referrer_url")
   landingPage String? @map("landing_page") // drives content-topic nurture branching
+
+  // Paid click identifiers. Without these, offline conversion import into the ad
+  // platforms is impossible — the platform never learns which click became a deal,
+  // so its bidding cannot optimise. Cheap to capture now; impossible to backfill.
+  gclid    String? // Google Ads
+  fbclid   String? // Meta
+  msclkid  String? // Microsoft Ads
+  liFatId  String? @map("li_fat_id") // LinkedIn
+
+  // The actual path through the site, newest last, JSON array of strings.
+  // pagesViewed is a count; this is the journey, which is what tells you which
+  // content is doing the work.
+  pageJourney String? @map("page_journey")
+
+  // How long they have been evaluating. GRC buyers research for months, so a long
+  // gap between first visit and submission is a strong intent signal, not a stale one.
+  daysSinceFirstVisit Int? @map("days_since_first_visit")
+
+  // Furthest scroll on the landing page, 0-100.
+  scrollDepth Int? @map("scroll_depth")
+
+  // Browser locale and timezone. Useful for region routing and for spotting an EU
+  // visitor, which changes which frameworks matter to them.
+  browserLanguage String? @map("browser_language")
+  browserTimezone String? @map("browser_timezone")
 
   // session + behaviour — feeds the behavioural dimension of the score
   sessionId       String? @map("session_id")
@@ -178,9 +205,19 @@ model TrackingData {
   ipAddress  String? @map("ip_address")
 
   // derived by the enrich job from ipAddress
-  geoCountry String? @map("geo_country")
-  geoRegion  String? @map("geo_region")
-  geoCity    String? @map("geo_city")
+  geoCountry    String? @map("geo_country")
+  geoRegion     String? @map("geo_region")
+  geoCity       String? @map("geo_city")
+  geoPostalCode String? @map("geo_postal_code")
+  geoTimezone   String? @map("geo_timezone")
+  geoLatitude   Float?  @map("geo_latitude")
+  geoLongitude  Float?  @map("geo_longitude")
+
+  // The network they are on. A corporate ISP is a meaningful B2B signal; a hosting
+  // or VPN range is worth knowing when a lead looks odd.
+  geoIsp          String?  @map("geo_isp")
+  geoOrganisation String?  @map("geo_organisation")
+  geoIsHosting    Boolean? @map("geo_is_hosting")
 
   createdAt DateTime @default(now()) @map("created_at")
 

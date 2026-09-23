@@ -120,6 +120,24 @@ const baseLead = {
   utmSource: 'google',
   utmMedium: 'cpc',
   utmCampaign: 'grc_q4',
+  referrerUrl: 'https://www.google.com/',
+  firstTouchSource: 'linkedin',
+  adClickIds: { gclid: 'Cj0KCQtest123' },
+  pageJourney: ['/blog/soc2-guide', '/platform', '/pricing', '/demo'],
+  pagesViewed: 8,
+  visitCount: 3,
+  timeOnSiteSec: 840,
+  daysSinceFirstVisit: 47,
+  visitedPricing: true,
+  scrollDepth: 92,
+  deviceType: 'desktop',
+  browserLanguage: 'de-DE',
+  browserTimezone: 'Europe/Berlin',
+  ipAddress: '88.99.100.50',
+  geoCity: 'Berlin',
+  geoRegion: 'Berlin',
+  geoIsp: 'Deutsche Telekom AG',
+  geoIsHosting: false,
   existingOdooId: null,
 };
 
@@ -238,6 +256,73 @@ describe('field mapping', () => {
     expect(description).toContain('Audit deadline next month');
     // Attribution — the thing that matters most pre-PPC.
     expect(description).toContain('/frameworks/soc2-checklist');
+  });
+
+  it('surfaces attribution, behaviour and context, not just the score', async () => {
+    // Capturing this and then not showing it wastes it: a rep would otherwise see a
+    // name and an email with no idea how engaged this person is.
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead });
+
+    const d = String(createdValues().description);
+
+    // attribution
+    expect(d).toContain('google.com'); // referrer
+    expect(d).toContain('linkedin'); // first touch
+    expect(d).toContain('Cj0KCQtest123'); // gclid, needed for offline conversions
+
+    // behaviour
+    expect(d).toContain('47 days'); // long evaluation = high intent in GRC
+    expect(d).toContain('92%'); // scroll depth
+    expect(d).toContain('Visited pricing');
+
+    // the route they took
+    expect(d).toContain('/blog/soc2-guide');
+    expect(d).toContain('&rarr;');
+
+    // context
+    expect(d).toContain('Berlin');
+    expect(d).toContain('Deutsche Telekom');
+    expect(d).toContain('Europe/Berlin');
+    expect(d).toContain('88.99.100.50');
+  });
+
+  it('omits sections with nothing in them', async () => {
+    // A footer signup knows almost nothing. The note must not be a wall of empty
+    // labels.
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({
+      ...baseLead,
+      adClickIds: null,
+      pageJourney: null,
+      visitCount: null,
+      pagesViewed: null,
+      timeOnSiteSec: null,
+      daysSinceFirstVisit: null,
+      scrollDepth: null,
+      visitedPricing: false,
+      geoCity: null,
+      geoRegion: null,
+      geoIsp: null,
+      ipAddress: null,
+      deviceType: null,
+      browserLanguage: null,
+      browserTimezone: null,
+      countryCode: null,
+    });
+
+    const d = String(createdValues().description);
+    expect(d).not.toContain('Behaviour');
+    expect(d).not.toContain('Page journey');
+    expect(d).not.toContain('Context');
+    // but attribution still renders
+    expect(d).toContain('Attribution');
+  });
+
+  it('flags a hosting or VPN network, which explains an odd reCAPTCHA score', async () => {
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead, geoIsHosting: true });
+    expect(String(createdValues().description)).toContain('hosting / VPN');
   });
 
   it('escapes HTML in user-supplied text', async () => {

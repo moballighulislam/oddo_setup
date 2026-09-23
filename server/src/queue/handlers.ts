@@ -14,6 +14,7 @@ import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { logger } from '../lib/logger.js';
 import { emailDomain } from '../services/antibot.js';
+import { lookupIp } from '../services/geo.js';
 import {
   pushToCrm,
   sendEmail,
@@ -98,13 +99,42 @@ const enrich: JobHandler = async (payload) => {
 
   const updates: Record<string, unknown> = {};
 
-  // Geolocation. MaxMind is not wired up — the country from the tracking row is
-  // used where Cloudflare supplied one. Read first because phone parsing needs it.
+  // Geolocation. Cloudflare's free plan gives only country, so anything finer needs
+  // an IP lookup. Runs here rather than in the request path — an external call must
+  // never sit between a visitor pressing submit and the response.
   const tracking = await prisma.trackingData.findUnique({ where: { submissionId } });
-  const countryHint = lead.countryCode ?? tracking?.geoCountry ?? null;
+
+  let countryHint = lead.countryCode ?? tracking?.geoCountry ?? null;
+
+  if (tracking && !tracking.geoCity) {
+    const geo = await lookupIp(tracking.ipAddress);
+
+    if (geo.countryCode || geo.city) {
+      await prisma.trackingData.update({
+        where: { id: tracking.id },
+        data: {
+          // The CDN edge header is more trustworthy than a third-party lookup, so
+          // it wins where both have an answer.
+          geoCountry: tracking.geoCountry ?? geo.countryCode,
+          geoRegion: geo.region,
+          geoCity: geo.city,
+          geoPostalCode: geo.postalCode,
+          geoTimezone: geo.timezone,
+          geoLatitude: geo.latitude,
+          geoLongitude: geo.longitude,
+          geoIsp: geo.isp,
+          geoOrganisation: geo.organisation,
+          geoIsHosting: geo.isHosting,
+        },
+      });
+      countryHint = countryHint ?? geo.countryCode;
+    }
+  }
 
   if (tracking?.geoCountry && !lead.countryCode) {
     updates.countryCode = tracking.geoCountry;
+  } else if (!lead.countryCode && countryHint) {
+    updates.countryCode = countryHint;
   }
 
   // Phone -> E.164. Stored raw at submit time because rejecting "+49 30 12345678"
@@ -356,6 +386,25 @@ const crmPush: JobHandler = async (payload, jobId) => {
     return;
   }
 
+  const t = submission.tracking;
+
+  // Only include click ids that are present, so the CRM note does not carry a row of
+  // empty labels.
+  const adClicks: Record<string, string> = {};
+  if (t?.gclid) adClicks.gclid = t.gclid;
+  if (t?.fbclid) adClicks.fbclid = t.fbclid;
+  if (t?.msclkid) adClicks.msclkid = t.msclkid;
+  if (t?.liFatId) adClicks.li_fat_id = t.liFatId;
+
+  let journey: string[] | null = null;
+  if (t?.pageJourney) {
+    try {
+      journey = JSON.parse(t.pageJourney) as string[];
+    } catch {
+      journey = null; // a malformed journey must not fail the CRM push
+    }
+  }
+
   const result = await pushToCrm({
     email: lead.email,
     firstName: lead.firstName,
@@ -373,11 +422,33 @@ const crmPush: JobHandler = async (payload, jobId) => {
     formId: submission.formId,
     formName: submission.formName,
     message: submission.messageText,
-    landingPage: submission.tracking?.landingPage ?? null,
-    pageUrl: submission.tracking?.pageUrl ?? null,
-    utmSource: submission.tracking?.utmSource ?? null,
-    utmMedium: submission.tracking?.utmMedium ?? null,
-    utmCampaign: submission.tracking?.utmCampaign ?? null,
+    landingPage: t?.landingPage ?? null,
+    pageUrl: t?.pageUrl ?? null,
+    referrerUrl: t?.referrerUrl ?? null,
+    utmSource: t?.utmSource ?? null,
+    utmMedium: t?.utmMedium ?? null,
+    utmCampaign: t?.utmCampaign ?? null,
+    firstTouchSource: lead.firstTouchSource,
+    adClickIds: Object.keys(adClicks).length > 0 ? adClicks : null,
+
+    pageJourney: journey,
+    pagesViewed: t?.pagesViewed ?? null,
+    visitCount: t?.visitCount ?? null,
+    timeOnSiteSec: t?.timeOnSiteSec ?? null,
+    daysSinceFirstVisit: t?.daysSinceFirstVisit ?? null,
+    visitedPricing: t?.visitedPricing ?? false,
+    scrollDepth: t?.scrollDepth ?? null,
+
+    deviceType: t?.deviceType ?? null,
+    browserLanguage: t?.browserLanguage ?? null,
+    browserTimezone: t?.browserTimezone ?? null,
+
+    ipAddress: t?.ipAddress ?? null,
+    geoCity: t?.geoCity ?? null,
+    geoRegion: t?.geoRegion ?? null,
+    geoIsp: t?.geoIsp ?? null,
+    geoIsHosting: t?.geoIsHosting ?? null,
+
     existingOdooId: lead.crmLeadId,
   });
 
