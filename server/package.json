@@ -20,7 +20,9 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "odoo:fields": "tsx scripts/odoo-create-fields.ts",
+    "odoo:fields:dry": "tsx scripts/odoo-create-fields.ts --dry-run"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

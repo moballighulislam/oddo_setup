@@ -358,7 +358,11 @@ const crmPush: JobHandler = async (payload, jobId) => {
 
   const lead = await prisma.lead.findUnique({
     where: { id: leadId },
-    include: { scores: { orderBy: { id: 'desc' }, take: 8 } },
+    include: {
+      scores: { orderBy: { id: 'desc' }, take: 8 },
+      // Oldest first, so [0] is the first conversion this person ever made.
+      submissions: { orderBy: { id: 'asc' }, select: { formId: true, createdAt: true } },
+    },
   });
   if (!lead) throw new Error(`lead ${leadId} not found`);
 
@@ -405,6 +409,31 @@ const crmPush: JobHandler = async (payload, jobId) => {
     }
   }
 
+  const firstSubmission = lead.submissions[0];
+  const lastSubmission = lead.submissions[lead.submissions.length - 1];
+
+  /**
+   * Lifecycle is the state of the relationship, which is not the same as the pipeline
+   * stage. A footer subscriber is not a lead in any useful sense; a demo requester is
+   * an opportunity before anyone has moved a card.
+   */
+  const lifecycle =
+    lead.routingTier === 'enterprise_ae' || lead.routingTier === 'sdr'
+      ? 'opportunity'
+      : submission.formId === 'footer_form'
+        ? 'subscriber'
+        : 'lead';
+
+  const adPlatform = t?.gclid
+    ? 'google'
+    : t?.fbclid
+      ? 'meta'
+      : t?.msclkid
+        ? 'microsoft'
+        : t?.liFatId
+          ? 'linkedin'
+          : null;
+
   const result = await pushToCrm({
     email: lead.email,
     firstName: lead.firstName,
@@ -421,6 +450,17 @@ const crmPush: JobHandler = async (payload, jobId) => {
     regionGroup: lead.regionGroup,
     // The ledger, so a human sees why it scored what it did rather than a bare number.
     scoreBreakdown: lead.scores.map((s) => `+${s.points} — ${s.reason}`),
+    leadRef: lead.publicId,
+    lifecycle,
+    slaDueAt: lead.slaDueAt?.toISOString() ?? null,
+    firstFormId: firstSubmission?.formId ?? null,
+    firstFormAt: firstSubmission?.createdAt.toISOString() ?? null,
+    lastFormAt: lastSubmission?.createdAt.toISOString() ?? null,
+    submissionCount: lead.submissions.length,
+    adPlatform,
+    consentGiven: lead.consentGiven,
+    consentAt: lead.consentAt?.toISOString() ?? null,
+    consentVersion: lead.consentTextVersion,
     formId: submission.formId,
     formName: submission.formName,
     message: submission.messageText,

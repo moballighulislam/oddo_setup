@@ -224,6 +224,15 @@ export interface OdooLeadInput {
   regionGroup: string | null;
   /** Readable score breakdown, so a human sees why it scored what it did. */
   scoreBreakdown: string[];
+  /** Our own lead id, so a record in Odoo can be traced back. */
+  leadRef: string | null;
+  firstFormId: string | null;
+  firstFormAt: string | null;
+  lastFormAt: string | null;
+  submissionCount: number | null;
+  lifecycle: string | null;
+  slaDueAt: string | null;
+  adPlatform: string | null;
   formId: string;
   formName: string;
   message: string | null;
@@ -250,6 +259,10 @@ export interface OdooLeadInput {
   deviceType: string | null;
   browserLanguage: string | null;
   browserTimezone: string | null;
+
+  consentGiven: boolean;
+  consentAt: string | null;
+  consentVersion: string | null;
 
   ipAddress: string | null;
   geoCity: string | null;
@@ -450,6 +463,10 @@ export async function pushLead(input: OdooLeadInput): Promise<OdooPushResult> {
     if (id !== null) tagIds.push(id);
   }
 
+  // Odoo stores dates as naive UTC strings, not ISO with a timezone.
+  const odooDt = (iso: string | null): string | null =>
+    iso ? iso.replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 19) : null;
+
   const values: Record<string, unknown> = {
     name: buildName(input),
     type,
@@ -459,7 +476,58 @@ export async function pushLead(input: OdooLeadInput): Promise<OdooPushResult> {
     partner_name: input.companyName,
     function: input.jobTitle,
     priority: priorityFromScore(input.leadScore),
+    // The description stays, but only as a readable summary. Everything that is
+    // worth filtering, grouping or reporting on now lives in a real field — a note
+    // cannot be queried, and attribution reporting is the whole point of this CRM.
     description: buildDescription(input),
+
+    // --- Layer 1: captured by the website ---
+    x_dn_lead_score: input.leadScore,
+    x_dn_routing_tier: input.routingTier,
+    x_dn_lifecycle: input.lifecycle,
+    x_dn_sla_due: odooDt(input.slaDueAt),
+
+    x_dn_first_form: input.firstFormId,
+    x_dn_first_form_date: odooDt(input.firstFormAt),
+    x_dn_last_form: input.formId,
+    x_dn_last_form_date: odooDt(input.lastFormAt),
+    x_dn_submission_count: input.submissionCount,
+    x_dn_form_placement: input.formName,
+
+    x_dn_company_size: input.companySize,
+    x_dn_solution_interest: input.solutionInterest,
+    x_dn_frameworks: input.frameworkInterest,
+    x_dn_region: input.regionGroup,
+    x_dn_company_domain: input.email.split('@')[1] ?? null,
+
+    x_dn_landing_page: input.landingPage,
+    x_dn_last_page: input.pageUrl,
+    x_dn_referrer: input.referrerUrl,
+    x_dn_first_touch: input.firstTouchSource,
+    x_dn_ad_click_id: input.adClickIds ? Object.values(input.adClickIds)[0] ?? null : null,
+    x_dn_ad_platform: input.adPlatform,
+
+    x_dn_days_evaluating: input.daysSinceFirstVisit,
+    x_dn_visit_count: input.visitCount,
+    x_dn_pages_viewed: input.pagesViewed,
+    x_dn_time_on_site: input.timeOnSiteSec === null ? null : Math.round(input.timeOnSiteSec / 60),
+    x_dn_scroll_depth: input.scrollDepth,
+    x_dn_visited_pricing: input.visitedPricing,
+    x_dn_page_journey: input.pageJourney?.join(' -> ') ?? null,
+
+    x_dn_geo_city: input.geoCity,
+    x_dn_geo_region: input.geoRegion,
+    x_dn_geo_isp: input.geoIsp,
+    x_dn_is_hosting_ip: input.geoIsHosting ?? false,
+    x_dn_device: input.deviceType,
+    x_dn_browser_language: input.browserLanguage,
+    x_dn_timezone: input.browserTimezone,
+    x_dn_ip_address: input.ipAddress,
+
+    x_dn_consent_given: input.consentGiven,
+    x_dn_consent_at: odooDt(input.consentAt),
+    x_dn_consent_version: input.consentVersion,
+    x_dn_lead_ref: input.leadRef,
   };
 
   if (teamId) values.team_id = teamId;
@@ -526,8 +594,17 @@ async function updateExisting(
   values: Record<string, unknown>,
   input: OdooLeadInput,
 ): Promise<void> {
+  const LAYER_1_PREFIX = 'x_dn_';
+
   const safe: Record<string, unknown> = {
     priority: values.priority,
+    // Layer 1 fields are machine-captured facts, so refreshing them is correct — a
+    // newer submission genuinely supersedes the old attribution and behaviour.
+    // Layer 2 and 3 fields are never touched here: those belong to whoever is
+    // working the deal.
+    ...Object.fromEntries(
+      Object.entries(values).filter(([k]) => k.startsWith(LAYER_1_PREFIX)),
+    ),
     // Fill blanks without clobbering anything a human corrected.
     ...(input.phone ? { phone: input.phone } : {}),
     ...(input.companyName ? { partner_name: input.companyName } : {}),

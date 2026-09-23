@@ -113,6 +113,17 @@ const baseLead = {
   frameworkInterest: 'soc2,iso27001',
   solutionInterest: 'compliance_automation,risk_management',
   regionGroup: 'eu',
+  leadRef: '01TESTLEADREF000000000000',
+  lifecycle: 'opportunity',
+  slaDueAt: '2026-09-23T12:00:00.000Z',
+  firstFormId: 'footer_form',
+  firstFormAt: '2026-08-01T09:00:00.000Z',
+  lastFormAt: '2026-09-23T11:00:00.000Z',
+  submissionCount: 3,
+  adPlatform: 'google',
+  consentGiven: true,
+  consentAt: '2026-09-23T11:00:00.000Z',
+  consentVersion: 'v1',
   scoreBreakdown: ['+30 — Submitted demo form', '+25 — Company size: 1000+'],
   formId: 'demo_form',
   formName: 'book_a_demo',
@@ -509,5 +520,80 @@ describe('deduplication', () => {
     });
     write = calls.find((c) => c.modelMethod === 'write');
     expect((write!.args![1] as Record<string, unknown>).type).toBeUndefined();
+  });
+});
+
+describe('custom fields', () => {
+  it('writes Layer 1 facts into real fields, not just the description', async () => {
+    // A note cannot be filtered, grouped or reported on — and attribution reporting
+    // is the whole purpose of this CRM.
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead });
+
+    const v = createdValues();
+    expect(v.x_dn_lead_score).toBe(100);
+    expect(v.x_dn_routing_tier).toBe('enterprise_ae');
+    expect(v.x_dn_lifecycle).toBe('opportunity');
+    expect(v.x_dn_landing_page).toBe('/frameworks/soc2-checklist');
+    expect(v.x_dn_days_evaluating).toBe(47);
+    expect(v.x_dn_visited_pricing).toBe(true);
+    expect(v.x_dn_region).toBe('eu');
+    expect(v.x_dn_company_size).toBe('1000+');
+    expect(v.x_dn_lead_ref).toBe('01TESTLEADREF000000000000');
+  });
+
+  it('records the conversion history the way HubSpot does — first and most recent', async () => {
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead });
+
+    const v = createdValues();
+    expect(v.x_dn_first_form).toBe('footer_form'); // subscribed first
+    expect(v.x_dn_last_form).toBe('demo_form'); // booked a demo later
+    expect(v.x_dn_submission_count).toBe(3);
+  });
+
+  it('converts timestamps to the naive UTC format Odoo expects', async () => {
+    // Odoo rejects ISO strings carrying a timezone.
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead });
+
+    const v = createdValues();
+    expect(v.x_dn_consent_at).toBe('2026-09-23 11:00:00');
+    expect(String(v.x_dn_sla_due)).not.toContain('T');
+    expect(String(v.x_dn_sla_due)).not.toContain('Z');
+  });
+
+  it('converts time on site to minutes', async () => {
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead, timeOnSiteSec: 840 });
+    expect(createdValues().x_dn_time_on_site).toBe(14);
+  });
+
+  it('identifies the ad platform from whichever click id is present', async () => {
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead });
+    expect(createdValues().x_dn_ad_platform).toBe('google');
+    expect(createdValues().x_dn_ad_click_id).toBe('Cj0KCQtest123');
+  });
+
+  it('refreshes Layer 1 on update but never touches qualification or deal fields', async () => {
+    // Layer 1 is machine-owned, so a newer submission genuinely supersedes it.
+    // Layer 2 and 3 belong to whoever is working the deal and must survive.
+    responses['crm.lead.search'] = [99];
+    const { pushLead } = await import('../../src/services/odoo.js');
+    await pushLead({ ...baseLead, existingOdooId: 99 });
+
+    const write = calls.find((c) => c.modelMethod === 'write');
+    const values = (write?.args?.[1] ?? {}) as Record<string, unknown>;
+
+    expect(values.x_dn_lead_score).toBe(100);
+    expect(values.x_dn_days_evaluating).toBe(47);
+
+    for (const key of Object.keys(values)) {
+      expect(key.startsWith('x_q_'), `must not write ${key}`).toBe(false);
+      expect(key.startsWith('x_d_'), `must not write ${key}`).toBe(false);
+    }
+    expect(values).not.toHaveProperty('stage_id');
+    expect(values).not.toHaveProperty('description');
   });
 });
